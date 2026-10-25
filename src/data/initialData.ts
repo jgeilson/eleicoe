@@ -4,7 +4,7 @@ export const initialElectionData: ElectionData = {
   "sourceUrl": "https://www.tse.jus.br",
   "articleTitle": "Painel Eleitoral 2026: Votação no Exterior (1º Turno x 2º Turno)",
   "publishedAt": "25/10/2026 - Apuração em tempo real",
-  "updatedAt": "2026-10-25T16:13:09.900Z",
+  "updatedAt": new Date().toISOString(),
   "headline": "Acompanhamento estatístico dos boletins de urna oficiais afixados nas seções eleitorais do exterior.",
   "tseDisclaimer": "Os votos de cada turno são independentes e NÃO se somam. Apuração oficial centralizada no TSE.",
   "candidates": {
