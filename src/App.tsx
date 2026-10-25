@@ -3,48 +3,75 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { ElectionData } from './types/election';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ElectionData, ApiResponse, FetchStatus } from './types/election';
 import { initialElectionData } from './data/initialData';
 import { Scorecard } from './components/Scorecard';
 import { CountryTable } from './components/CountryTable';
-import { RefreshCw, Sun, Moon } from 'lucide-react';
+import { RefreshCw, Sun, Moon, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 
 export default function App() {
   const [data, setData] = useState<ElectionData>(initialElectionData);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [lastFetchedAt, setLastFetchedAt] = useState<string>(new Date().toISOString());
-  const [dataUpdatedAt, setDataUpdatedAt] = useState<string>(
+  const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
+  const [dataUpdatedAt, setDataUpdatedAt] = useState<string | null>(
     initialElectionData.dataUpdatedAt || '2026-10-25T14:32:00.000Z'
   );
+  const [fetchStatus, setFetchStatus] = useState<FetchStatus>('CACHE_FALLBACK');
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
+  const isFetchingRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const fetchData = useCallback(async () => {
+    // Prevent overlapping queries
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setIsLoading(true);
-    const nowISO = new Date().toISOString();
-    setLastFetchedAt(nowISO);
+
+    // Cancel previous in-flight request if any
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      const response = await fetch('/api/data').catch(() => null);
+      const response = await fetch('/api/data', { signal: controller.signal });
       if (response && response.ok) {
-        const result = await response.json();
-        if (result && result.data && Array.isArray(result.data.countries) && result.data.countries.length > 0) {
+        const result: ApiResponse = await response.json();
+        if (result && result.success && result.data) {
           setData(result.data);
+          setFetchStatus(result.status);
+          setFetchError(result.fetchError);
+          setLastFetchedAt(result.lastFetchedAt);
           if (result.dataUpdatedAt) {
             setDataUpdatedAt(result.dataUpdatedAt);
           }
         }
+      } else {
+        setFetchStatus('CACHE_FALLBACK');
       }
-    } catch (err) {
-      console.warn('Consulta ao servidor concluída:', err);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('Erro ao consultar dados:', err);
+        setFetchStatus('CACHE_FALLBACK');
+      }
     } finally {
       setIsLoading(false);
+      isFetchingRef.current = false;
     }
   }, []);
 
   // Initial fetch on mount
   useEffect(() => {
     fetchData();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchData]);
 
   // Automatic periodic refresh every 60 seconds
@@ -55,16 +82,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const formattedLastFetched = new Date(lastFetchedAt).toLocaleTimeString('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
+  const formattedLastFetched = lastFetchedAt
+    ? new Date(lastFetchedAt).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    : null;
 
-  const formattedDataUpdated = new Date(dataUpdatedAt).toLocaleTimeString('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  const formattedDataUpdated = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : 'Desconhecido';
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -88,12 +119,32 @@ export default function App() {
 
             <div className="flex items-center gap-2">
               <div className="hidden sm:flex flex-col text-right pr-2 border-r border-slate-200 dark:border-slate-800">
-                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                  Dados do 2ºT: {formattedDataUpdated}
+                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                  Dados dos Votos: {formattedDataUpdated}
                 </span>
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 justify-end">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Checado às {formattedLastFetched}
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 justify-end mt-0.5">
+                  {fetchStatus === 'LIVE_UPDATED' && (
+                    <>
+                      <CheckCircle className="w-2.5 h-2.5 text-emerald-500" />
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                        Novos votos validados
+                      </span>
+                    </>
+                  )}
+                  {fetchStatus === 'LIVE_UNCHANGED' && (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span>Checado às {formattedLastFetched} (sem alterações)</span>
+                    </>
+                  )}
+                  {fetchStatus === 'CACHE_FALLBACK' && (
+                    <>
+                      <Clock className="w-2.5 h-2.5 text-slate-400" />
+                      <span>
+                        {formattedLastFetched ? `Checado às ${formattedLastFetched}` : 'Fonte salva'}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
 

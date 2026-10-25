@@ -37,7 +37,7 @@ export interface ElectionData {
   articleTitle: string;
   publishedAt: string;
   updatedAt: string;
-  dataUpdatedAt?: string;
+  dataUpdatedAt?: string | null;
   lastFetchedAt?: string;
   headline: string;
   tseDisclaimer: string;
@@ -47,4 +47,16 @@ export interface ElectionData {
   };
   countries: CountryResult[];
   keyHighlights: string[];
+}
+
+export type FetchStatus = 'LIVE_UPDATED' | 'LIVE_UNCHANGED' | 'CACHE_FALLBACK';
+
+export interface ApiResponse {
+  success: boolean;
+  status: FetchStatus;
+  isLive: boolean;
+  fetchError: string | null;
+  lastFetchedAt: string;
+  dataUpdatedAt: string | null;
+  data: ElectionData;
 }

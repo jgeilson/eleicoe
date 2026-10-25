@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { parseG1Html } from './src/utils/parser';
+import { getOrFetchElectionData } from './src/services/electionService';
 
 dotenv.config();
 
@@ -24,102 +24,31 @@ app.use((req, res, next) => {
   next();
 });
 
-let cachedElectionData: any = null;
-let lastKnownDataUpdatedAt = '2026-10-25T14:32:00.000Z';
-
-async function refreshG1InBackground(url = 'https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml') {
+const handleApiRequest = async (req: express.Request, res: express.Response) => {
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
-      signal: AbortSignal.timeout(5000)
-    });
-    if (response.ok) {
-      const html = await response.text();
-      const freshData = parseG1Html(html);
-      if (freshData && freshData.countries.length > 0) {
-        const currentT2Count = freshData.countries.filter((c: any) => c.turno2.disponivel).length;
-        const prevT2Count = cachedElectionData ? cachedElectionData.countries.filter((c: any) => c.turno2.disponivel).length : 0;
-        if (!cachedElectionData || currentT2Count !== prevT2Count) {
-          lastKnownDataUpdatedAt = new Date().toISOString();
-        }
-        cachedElectionData = freshData;
-      }
-    }
-  } catch (err) {
-    console.warn('Background refresh:', err);
-  }
-}
+    const url = (req.body?.url || req.query?.url) as string | undefined;
+    const rawHtml = req.body?.rawHtml as string | undefined;
 
-app.get('/api/data', (_req, res) => {
-  if (!cachedElectionData) {
-    try {
-      const fs = require('fs');
-      if (fs.existsSync('/tmp/g1_page.html')) {
-        cachedElectionData = parseG1Html(fs.readFileSync('/tmp/g1_page.html', 'utf8'));
-      }
-    } catch (e) {
-      console.warn('Fallback error:', e);
-    }
-  }
-  refreshG1InBackground();
-  const lastFetchedAt = new Date().toISOString();
-  return res.json({
-    success: true,
-    lastFetchedAt,
-    dataUpdatedAt: lastKnownDataUpdatedAt,
-    data: cachedElectionData
-  });
-});
-
-const handleScrape = async (req: express.Request, res: express.Response) => {
-  try {
-    const url = req.body?.url || req.query?.url || 'https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml';
-    let htmlContent = req.body?.rawHtml || '';
-
-    if (!htmlContent && !cachedElectionData) {
-      try {
-        const fs = require('fs');
-        if (fs.existsSync('/tmp/g1_page.html')) {
-          cachedElectionData = parseG1Html(fs.readFileSync('/tmp/g1_page.html', 'utf8'));
-        }
-      } catch (e) {
-        console.warn('Fallback load:', e);
-      }
-    }
-
-    if (htmlContent) {
-      cachedElectionData = parseG1Html(htmlContent);
-    }
-
-    const lastFetchedAt = new Date().toISOString();
-    return res.json({
-      success: true,
-      fetchedUrl: url,
-      lastFetchedAt,
-      dataUpdatedAt: lastKnownDataUpdatedAt,
-      data: cachedElectionData
-    });
+    const result = await getOrFetchElectionData(url, rawHtml);
+    return res.json(result);
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message, fallbackData: cachedElectionData });
+    return res.status(500).json({
+      success: false,
+      status: 'CACHE_FALLBACK',
+      isLive: false,
+      fetchError: error.message,
+      lastFetchedAt: new Date().toISOString(),
+      dataUpdatedAt: null,
+      data: null
+    });
   }
 };
 
-app.get('/api/scrape-g1', handleScrape);
-app.post('/api/scrape-g1', handleScrape);
+app.get('/api/data', handleApiRequest);
+app.get('/api/scrape-g1', handleApiRequest);
+app.post('/api/scrape-g1', handleApiRequest);
 
 async function startServer() {
-  try {
-    const fs = await import('fs');
-    if (fs.existsSync('/tmp/g1_page.html')) {
-      cachedElectionData = parseG1Html(fs.readFileSync('/tmp/g1_page.html', 'utf8'));
-    }
-  } catch (e) {
-    console.warn('Initial preload:', e);
-  }
-
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
