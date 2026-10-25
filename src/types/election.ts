@@ -37,6 +37,8 @@ export interface ElectionData {
   articleTitle: string;
   publishedAt: string;
   updatedAt: string;
+  dataUpdatedAt?: string;
+  lastFetchedAt?: string;
   headline: string;
   tseDisclaimer: string;
   candidates: {

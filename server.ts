@@ -25,6 +25,7 @@ app.use((req, res, next) => {
 });
 
 let cachedElectionData: any = null;
+let lastKnownDataUpdatedAt = '2026-10-25T14:32:00.000Z';
 
 async function refreshG1InBackground(url = 'https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml') {
   try {
@@ -39,8 +40,12 @@ async function refreshG1InBackground(url = 'https://g1.globo.com/mundo/noticia/2
       const html = await response.text();
       const freshData = parseG1Html(html);
       if (freshData && freshData.countries.length > 0) {
+        const currentT2Count = freshData.countries.filter((c: any) => c.turno2.disponivel).length;
+        const prevT2Count = cachedElectionData ? cachedElectionData.countries.filter((c: any) => c.turno2.disponivel).length : 0;
+        if (!cachedElectionData || currentT2Count !== prevT2Count) {
+          lastKnownDataUpdatedAt = new Date().toISOString();
+        }
         cachedElectionData = freshData;
-        cachedElectionData.updatedAt = new Date().toISOString();
       }
     }
   } catch (err) {
@@ -60,10 +65,13 @@ app.get('/api/data', (_req, res) => {
     }
   }
   refreshG1InBackground();
-  if (cachedElectionData) {
-    cachedElectionData.updatedAt = new Date().toISOString();
-  }
-  return res.json({ success: true, data: cachedElectionData });
+  const lastFetchedAt = new Date().toISOString();
+  return res.json({
+    success: true,
+    lastFetchedAt,
+    dataUpdatedAt: lastKnownDataUpdatedAt,
+    data: cachedElectionData
+  });
 });
 
 const handleScrape = async (req: express.Request, res: express.Response) => {
@@ -86,14 +94,12 @@ const handleScrape = async (req: express.Request, res: express.Response) => {
       cachedElectionData = parseG1Html(htmlContent);
     }
 
-    if (cachedElectionData) {
-      cachedElectionData.updatedAt = new Date().toISOString();
-    }
-
+    const lastFetchedAt = new Date().toISOString();
     return res.json({
       success: true,
       fetchedUrl: url,
-      fetchedAt: cachedElectionData?.updatedAt || new Date().toISOString(),
+      lastFetchedAt,
+      dataUpdatedAt: lastKnownDataUpdatedAt,
       data: cachedElectionData
     });
   } catch (error: any) {

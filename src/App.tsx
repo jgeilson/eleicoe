@@ -13,41 +13,63 @@ import { RefreshCw, Sun, Moon } from 'lucide-react';
 export default function App() {
   const [data, setData] = useState<ElectionData>(initialElectionData);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [lastUpdated, setLastUpdated] = useState<string>(initialElectionData.updatedAt || new Date().toISOString());
+  const [lastFetchedAt, setLastFetchedAt] = useState<string>(new Date().toISOString());
+  const [dataUpdatedAt, setDataUpdatedAt] = useState<string>(
+    initialElectionData.dataUpdatedAt || '2026-10-25T14:32:00.000Z'
+  );
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
+    const nowISO = new Date().toISOString();
+    setLastFetchedAt(nowISO);
+
     try {
       const response = await fetch('/api/data').catch(() => null);
       if (response && response.ok) {
         const result = await response.json();
         if (result && result.data && Array.isArray(result.data.countries) && result.data.countries.length > 0) {
           setData(result.data);
-          setLastUpdated(result.data.updatedAt || new Date().toISOString());
+          if (result.dataUpdatedAt) {
+            setDataUpdatedAt(result.dataUpdatedAt);
+          }
         }
-      } else {
-        // Fallback to verified real dataset without synthetic simulation
-        setData(initialElectionData);
-        setLastUpdated(new Date().toISOString());
       }
     } catch (err) {
-      console.warn('Usando dados reais validados do G1:', err);
-      setData(initialElectionData);
-      setLastUpdated(new Date().toISOString());
+      console.warn('Consulta ao servidor concluída:', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  // Initial fetch on mount
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  // Automatic periodic refresh every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchData();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const formattedLastFetched = new Date(lastFetchedAt).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  const formattedDataUpdated = new Date(dataUpdatedAt).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
-        {/* Simple & Clean Header */}
+        {/* Header */}
         <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -65,15 +87,20 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Atualizado: {new Date(lastUpdated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              </span>
+              <div className="hidden sm:flex flex-col text-right pr-2 border-r border-slate-200 dark:border-slate-800">
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                  Dados do 2ºT: {formattedDataUpdated}
+                </span>
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 justify-end">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Checado às {formattedLastFetched}
+                </span>
+              </div>
 
               <button
                 onClick={() => fetchData()}
                 disabled={isLoading}
-                title="Atualizar dados agora"
+                title="Consultar novas parciais agora"
                 className="p-2 rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -90,7 +117,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Main Content: Just the General Comparison and Country/Region Comparison */}
+        {/* Main Content */}
         <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="space-y-6">
             {/* 1. Comparação Geral */}
@@ -101,7 +128,7 @@ export default function App() {
           </div>
         </main>
 
-        {/* Minimal Footer */}
+        {/* Footer */}
         <footer className="border-t border-slate-200 dark:border-slate-800 py-6 mt-12 text-center text-xs text-slate-500 dark:text-slate-400">
           <p>
             Fonte de dados: https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml

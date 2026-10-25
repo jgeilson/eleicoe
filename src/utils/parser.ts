@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { ElectionData, CountryResult, RoundVotes } from '../types/election';
+import { ElectionData, CountryResult } from '../types/election';
 
 const flagMap: Record<string, string> = {
   'Austrália': '🇦🇺',
@@ -32,10 +32,67 @@ const flagMap: Record<string, string> = {
   'Canadá': '🇨🇦',
   'Argentina': '🇦🇷',
   'Uruguai': '🇺🇾',
-  'Chile': '🇨🇱',
+  'Chile': 'CL',
   'Paraguai': '🇵🇾',
   'México': '🇲🇽'
 };
+
+function generateDynamicHighlights(countries: CountryResult[]): string[] {
+  const reportedT2 = countries.filter((c) => c.turno2.disponivel);
+  const pendingT2 = countries.filter((c) => !c.turno2.disponivel);
+
+  const t2Lula = reportedT2.reduce((acc, c) => acc + c.turno2.votosLula, 0);
+  const t2Bolsonaro = reportedT2.reduce((acc, c) => acc + c.turno2.votosBolsonaro, 0);
+
+  const lulaWins = reportedT2.filter((c) => c.turno2.winner === 'Lula');
+  const bolsonaroWins = reportedT2.filter((c) => c.turno2.winner === 'Flávio Bolsonaro');
+
+  const lulaTopCountries = lulaWins
+    .slice()
+    .sort((a, b) => b.turno2.votosLula - a.turno2.votosLula)
+    .slice(0, 5)
+    .map((c) => c.country)
+    .join(', ');
+
+  const bolsonaroTopCountries = bolsonaroWins
+    .slice()
+    .sort((a, b) => b.turno2.votosBolsonaro - a.turno2.votosBolsonaro)
+    .slice(0, 5)
+    .map((c) => c.country)
+    .join(', ');
+
+  const highlights: string[] = [
+    'Os dados de cada turno são rigorosamente independentes e NÃO se somam.',
+    `Na parcial do 2º turno, foram apurados ${reportedT2.length} países no exterior (${pendingT2.length} aguardando apuração).`
+  ];
+
+  if (reportedT2.length > 0) {
+    if (t2Bolsonaro > t2Lula) {
+      highlights.push(
+        `No total parcial apurado do 2º turno, Flávio Bolsonaro lidera no exterior com ${t2Bolsonaro.toLocaleString('pt-BR')} votos contra ${t2Lula.toLocaleString('pt-BR')} de Lula.`
+      );
+    } else if (t2Lula > t2Bolsonaro) {
+      highlights.push(
+        `No total parcial apurado do 2º turno, Lula lidera no exterior com ${t2Lula.toLocaleString('pt-BR')} votos contra ${t2Bolsonaro.toLocaleString('pt-BR')} de Flávio Bolsonaro.`
+      );
+    }
+
+    if (lulaWins.length > 0) {
+      highlights.push(
+        `Lula venceu o 2º turno em ${lulaWins.length} país(es)${lulaTopCountries ? ` (incluindo ${lulaTopCountries})` : ''}.`
+      );
+    }
+    if (bolsonaroWins.length > 0) {
+      highlights.push(
+        `Flávio Bolsonaro venceu o 2º turno em ${bolsonaroWins.length} país(es)${bolsonaroTopCountries ? ` (incluindo ${bolsonaroTopCountries})` : ''}.`
+      );
+    }
+  }
+
+  highlights.push('A totalização oficial do Tribunal Superior Eleitoral (TSE) é centralizada no sistema de apuração.');
+
+  return highlights;
+}
 
 export function parseG1Html(html: string): ElectionData {
   const $ = cheerio.load(html);
@@ -54,7 +111,7 @@ export function parseG1Html(html: string): ElectionData {
     '25/10/2026 - 11:32 (Horário de Brasília)';
 
   const items: string[] = [];
-  $('.content-text, p, h2').each((_, el) => {
+  $('.content-text, p, h2, h3').each((_, el) => {
     const t = $(el).text().trim();
     if (t) items.push(t);
   });
@@ -146,7 +203,7 @@ export function parseG1Html(html: string): ElectionData {
       const countryResult: CountryResult = {
         id: countryName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
         country: countryName,
-        code: (countryName.slice(0, 2)).toUpperCase(),
+        code: countryName.slice(0, 2).toUpperCase(),
         continent: continentTag,
         flag: flagMap[countryName] || '🌐',
         locais: [countryName],
@@ -187,18 +244,15 @@ export function parseG1Html(html: string): ElectionData {
     }
   }
 
-  const keyHighlights = [
-    'Os dados de cada turno são rigorosamente independentes e NÃO se somam.',
-    'Na parcial apurada do 2º turno pelo G1 (11h31), Flávio Bolsonaro lidera com 33.733 votos contra 15.578 de Lula no exterior.',
-    'Lula venceu o 2º turno em 10 países (incluindo Austrália, China, Nova Zelândia, Coreia do Sul e Singapura).',
-    'Flávio Bolsonaro venceu o 2º turno em 7 países (incluindo Japão com 28.538 votos, Emirados Árabes, Malásia e Taiwan).'
-  ];
+  const countriesList = Array.from(countriesMap.values());
+  const keyHighlights = generateDynamicHighlights(countriesList);
 
   return {
     sourceUrl: 'https://www.tse.jus.br',
-    articleTitle: 'Painel Eleitoral 2026: Votação no Exterior (1º Turno x 2º Turno)',
+    articleTitle: title,
     publishedAt,
     updatedAt: new Date().toISOString(),
+    dataUpdatedAt: '2026-10-25T14:32:00.000Z',
     headline,
     tseDisclaimer: 'Os votos de cada turno são independentes e NÃO se somam. Apuração oficial centralizada no TSE.',
     candidates: {
@@ -217,7 +271,7 @@ export function parseG1Html(html: string): ElectionData {
         color: '#2563EB'
       }
     },
-    countries: Array.from(countriesMap.values()),
+    countries: countriesList,
     keyHighlights
   };
 }
