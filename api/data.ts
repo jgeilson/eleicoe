@@ -46,10 +46,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = parseG1Html(htmlContent);
+    data.updatedAt = new Date().toISOString();
 
     return res.status(200).json({
       success: true,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: data.updatedAt,
       data
     });
   } catch (error: any) {

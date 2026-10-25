@@ -27,7 +27,7 @@ export default function App() {
         const result = await response.json();
         if (result && result.data && Array.isArray(result.data.countries) && result.data.countries.length > 0) {
           setData(result.data);
-          setLastUpdated(result.data.updatedAt || new Date().toISOString());
+          setLastUpdated(new Date().toISOString());
         }
       }
     } catch (err) {
