@@ -1,0 +1,6 @@
+{
+  "name": "Votação no Exterior - Eleições 2026",
+  "description": "Painel e leitor em tempo real dos boletins de urna e resultados da votação no exterior no 2º turno entre Lula e Flávio Bolsonaro.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
