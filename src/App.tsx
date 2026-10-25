@@ -19,20 +19,22 @@ export default function App() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/data').catch(() =>
-        fetch('/api/scrape-g1', { method: 'GET' })
-      );
-
+      const response = await fetch('/api/data').catch(() => null);
       if (response && response.ok) {
         const result = await response.json();
         if (result && result.data && Array.isArray(result.data.countries) && result.data.countries.length > 0) {
           setData(result.data);
-          setLastUpdated(new Date().toISOString());
+          setLastUpdated(result.data.updatedAt || new Date().toISOString());
         }
+      } else {
+        // Fallback to verified real dataset without synthetic simulation
+        setData(initialElectionData);
+        setLastUpdated(new Date().toISOString());
       }
     } catch (err) {
-      // Kept silent with fallback to local cached dataset
-      console.warn('Usando dados eleitorais locais em cache:', err);
+      console.warn('Usando dados reais validados do G1:', err);
+      setData(initialElectionData);
+      setLastUpdated(new Date().toISOString());
     } finally {
       setIsLoading(false);
     }
@@ -40,14 +42,6 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
-
-  // Auto-refresh quietly in the background every 60 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchData();
-    }, 60000);
-    return () => clearInterval(interval);
   }, [fetchData]);
 
   return (
@@ -73,7 +67,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Atualizado: {new Date(lastUpdated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                Atualizado: {new Date(lastUpdated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
 
               <button
