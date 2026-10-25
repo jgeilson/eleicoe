@@ -30,10 +30,6 @@ export default function App() {
     isFetchingRef.current = true;
     setIsLoading(true);
 
-    // Cancel previous in-flight request if any
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
     const controller = new AbortController();
     abortControllerRef.current = controller;
 

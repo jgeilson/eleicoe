@@ -4,9 +4,55 @@ import { parseG1Html } from '../utils/parser';
 import * as fs from 'fs';
 import * as path from 'path';
 
-let cachedData: ElectionData | null = null;
-let lastElectionSignature: string | null = null;
-let dataUpdatedAt: string | null = null;
+const PERSISTENT_CACHE_FILE = path.join('/tmp', 'election_cache_v2.json');
+
+interface PersistentState {
+  data: ElectionData;
+  signature: string;
+  dataUpdatedAt: string | null;
+}
+
+let memoryState: PersistentState | null = null;
+
+function loadPersistentState(): PersistentState {
+  if (memoryState) {
+    return memoryState;
+  }
+
+  try {
+    if (fs.existsSync(PERSISTENT_CACHE_FILE)) {
+      const raw = fs.readFileSync(PERSISTENT_CACHE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.data && parsed.signature) {
+        memoryState = parsed;
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao carregar cache persistente de disco:', err);
+  }
+
+  // Initial baseline if no persistent cache file exists
+  const initialSig = computeElectionSignature(initialElectionData);
+  const baseline: PersistentState = {
+    data: initialElectionData,
+    signature: initialSig,
+    dataUpdatedAt: '2026-10-25T14:32:00.000Z' // Official publication timestamp
+  };
+
+  memoryState = baseline;
+  savePersistentState(baseline);
+  return baseline;
+}
+
+function savePersistentState(state: PersistentState) {
+  memoryState = state;
+  try {
+    fs.writeFileSync(PERSISTENT_CACHE_FILE, JSON.stringify(state), 'utf8');
+  } catch (err) {
+    console.warn('Erro ao salvar cache em disco:', err);
+  }
+}
 
 export function computeElectionSignature(data: ElectionData): string {
   if (!data || !Array.isArray(data.countries)) return '';
@@ -27,16 +73,11 @@ export async function getOrFetchElectionData(
     targetUrl ||
     'https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml';
 
+  const currentState = loadPersistentState();
+
   let htmlContent = providedHtml || '';
   let isLive = false;
   let fetchError: string | null = null;
-
-  // Initialize cache with initial verified dataset if not present
-  if (!cachedData) {
-    cachedData = initialElectionData;
-    lastElectionSignature = computeElectionSignature(initialElectionData);
-    dataUpdatedAt = '2026-10-25T14:32:00.000Z'; // Time of original G1 publishing
-  }
 
   // Attempt live HTTP fetch if no HTML provided directly
   if (!htmlContent) {
@@ -70,15 +111,15 @@ export async function getOrFetchElectionData(
         isLive = true;
         const newSignature = computeElectionSignature(parsed);
 
-        if (lastElectionSignature === null || newSignature !== lastElectionSignature) {
+        if (newSignature !== currentState.signature) {
           status = 'LIVE_UPDATED';
-          lastElectionSignature = newSignature;
-          dataUpdatedAt = new Date().toISOString();
+          currentState.dataUpdatedAt = new Date().toISOString();
+          currentState.signature = newSignature;
+          currentState.data = parsed;
+          savePersistentState(currentState);
         } else {
           status = 'LIVE_UNCHANGED';
         }
-
-        cachedData = parsed;
       } else {
         fetchError = 'Conteúdo HTML retornado não contém dados de países válidos';
       }
@@ -87,28 +128,11 @@ export async function getOrFetchElectionData(
     }
   }
 
-  // Ensure local file fallback if cache is somehow null
-  if (!cachedData) {
-    try {
-      const fallbackPath = path.resolve(process.cwd(), 'tmp_g1.html');
-      if (fs.existsSync(fallbackPath)) {
-        cachedData = parseG1Html(fs.readFileSync(fallbackPath, 'utf8'));
-      }
-    } catch (e) {
-      // Ignore file read error
-    }
-  }
-
-  // Guaranteed fallback
-  if (!cachedData) {
-    cachedData = initialElectionData;
-  }
-
   // Populate metadata
   const finalData: ElectionData = {
-    ...cachedData,
+    ...currentState.data,
     lastFetchedAt,
-    dataUpdatedAt: dataUpdatedAt || '2026-10-25T14:32:00.000Z'
+    dataUpdatedAt: currentState.dataUpdatedAt
   };
 
   return {
@@ -117,7 +141,7 @@ export async function getOrFetchElectionData(
     isLive,
     fetchError,
     lastFetchedAt,
-    dataUpdatedAt: dataUpdatedAt || '2026-10-25T14:32:00.000Z',
+    dataUpdatedAt: currentState.dataUpdatedAt,
     data: finalData
   };
 }
