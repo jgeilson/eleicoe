@@ -1,6 +1,6 @@
-import { ElectionData, ApiResponse, FetchStatus } from '../types/election';
-import { initialElectionData } from '../data/initialData';
-import { parseG1Html } from '../utils/parser';
+import { ElectionData, ApiResponse, FetchStatus } from '../types/election.js';
+import { initialElectionData } from '../data/initialData.js';
+import { parseG1Html } from '../utils/parser.js';
 import * as fs from 'fs';
 import * as path from 'path';
 

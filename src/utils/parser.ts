@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { ElectionData, CountryResult } from '../types/election';
+import { ElectionData, CountryResult } from '../types/election.js';
 
 const flagMap: Record<string, string> = {
   'Austrália': '🇦🇺',

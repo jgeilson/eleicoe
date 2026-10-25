@@ -1,2 +1,2 @@
-import handler from './data';
+import handler from './data.js';
 export default handler;

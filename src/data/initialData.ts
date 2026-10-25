@@ -1,4 +1,4 @@
-import { ElectionData } from '../types/election';
+import { ElectionData } from '../types/election.js';
 
 export const initialElectionData: ElectionData = {
   "sourceUrl": "https://www.tse.jus.br",

@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getOrFetchElectionData } from './src/services/electionService';
+import { getOrFetchElectionData } from './src/services/electionService.js';
 
 dotenv.config();
 
