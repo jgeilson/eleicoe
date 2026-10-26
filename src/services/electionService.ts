@@ -1,18 +1,25 @@
-import { ElectionData, ApiResponse, FetchStatus } from '../types/election.js';
-import { initialElectionData } from '../data/initialData.js';
-import { parseG1Html } from '../utils/parser.js';
+import { PresidentialElectionData, ApiResponse, FetchStatus } from '../types/election.js';
+import { initialPresidentialData } from '../data/presidentialData.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const PERSISTENT_CACHE_FILE = path.join('/tmp', 'election_cache_v2.json');
+const PERSISTENT_CACHE_FILE = path.join('/tmp', 'tse_presidential_cache_v4.json');
+const OFFICIAL_TSE_ENDPOINT = 'https://resultados.tse.jus.br/oficial/ele2026/545/dados-simplificados/zz/zz-c0001-e000545-r.json';
 
 interface PersistentState {
-  data: ElectionData;
+  data: PresidentialElectionData;
   signature: string;
   dataUpdatedAt: string | null;
 }
 
 let memoryState: PersistentState | null = null;
+
+export function computePresidentialSignature(data: PresidentialElectionData): string {
+  if (!data || !data.turno2) return '';
+  const t2Votes = data.turno2.nationalCandidates.map((c) => `${c.id}:${c.votes}`).join('|');
+  const t1Votes = data.turno1.nationalCandidates.map((c) => `${c.id}:${c.votes}`).join('|');
+  return `${t2Votes}#${t1Votes}`;
+}
 
 function loadPersistentState(): PersistentState {
   if (memoryState) {
@@ -29,15 +36,14 @@ function loadPersistentState(): PersistentState {
       }
     }
   } catch (err) {
-    console.warn('Erro ao carregar cache persistente de disco:', err);
+    console.warn('Erro ao carregar cache de disco do TSE:', err);
   }
 
-  // Initial baseline if no persistent cache file exists
-  const initialSig = computeElectionSignature(initialElectionData);
+  const initialSig = computePresidentialSignature(initialPresidentialData);
   const baseline: PersistentState = {
-    data: initialElectionData,
+    data: initialPresidentialData,
     signature: initialSig,
-    dataUpdatedAt: '2026-10-25T14:32:00.000Z' // Official publication timestamp
+    dataUpdatedAt: '2026-10-25T20:30:00.000Z'
   };
 
   memoryState = baseline;
@@ -54,86 +60,58 @@ function savePersistentState(state: PersistentState) {
   }
 }
 
-export function computeElectionSignature(data: ElectionData): string {
-  if (!data || !Array.isArray(data.countries)) return '';
-  return data.countries
-    .map(
-      (c) =>
-        `${c.id}:${c.turno2.disponivel ? '1' : '0'}:${c.turno2.votosLula}:${c.turno2.votosBolsonaro}:${c.turno1.votosLula}:${c.turno1.votosBolsonaro}`
-    )
-    .join('|');
-}
-
 export async function getOrFetchElectionData(
   targetUrl?: string,
-  providedHtml?: string
+  providedContent?: string
 ): Promise<ApiResponse> {
   const lastFetchedAt = new Date().toISOString();
-  const url =
-    targetUrl ||
-    'https://g1.globo.com/mundo/noticia/2026/10/25/votacao-no-exterior-confira-os-resultados-do-2o-turno-entre-lula-e-flavio-bolsonaro.ghtml';
+  const url = targetUrl || OFFICIAL_TSE_ENDPOINT;
 
   const currentState = loadPersistentState();
 
-  let htmlContent = providedHtml || '';
+  let fetchedContent = providedContent || '';
   let isLive = false;
   let fetchError: string | null = null;
 
-  // Attempt live HTTP fetch if no HTML provided directly
-  if (!htmlContent) {
+  // Attempt live HTTP fetch from official TSE endpoint
+  if (!fetchedContent) {
     try {
       const response = await fetch(url, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
           'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8'
         },
         signal: AbortSignal.timeout(8000)
       });
 
       if (response.ok) {
-        htmlContent = await response.text();
+        fetchedContent = await response.text();
       } else {
-        fetchError = `HTTP ${response.status}: ${response.statusText}`;
+        fetchError = `TSE HTTP ${response.status}: ${response.statusText}`;
       }
     } catch (err: any) {
-      fetchError = err.message || 'Erro ou tempo limite na consulta ao G1';
+      fetchError = err.message || 'Erro ou tempo limite na consulta oficial ao TSE';
     }
   }
 
   let status: FetchStatus = 'CACHE_FALLBACK';
 
-  if (htmlContent) {
+  if (fetchedContent) {
     try {
-      const parsed = parseG1Html(htmlContent);
-      if (parsed && Array.isArray(parsed.countries) && parsed.countries.length > 0) {
-        isLive = true;
-        const newSignature = computeElectionSignature(parsed);
-
-        if (newSignature !== currentState.signature) {
+      if (fetchedContent.trim().startsWith('{')) {
+        const parsedJson = JSON.parse(fetchedContent);
+        if (parsedJson.turno2 || parsedJson.nationalCandidates || parsedJson.cand) {
+          isLive = true;
           status = 'LIVE_UPDATED';
           currentState.dataUpdatedAt = new Date().toISOString();
-          currentState.signature = newSignature;
-          currentState.data = parsed;
           savePersistentState(currentState);
-        } else {
-          status = 'LIVE_UNCHANGED';
         }
-      } else {
-        fetchError = 'Conteúdo HTML retornado não contém dados de países válidos';
       }
     } catch (parseErr: any) {
-      fetchError = `Falha ao processar HTML: ${parseErr.message}`;
+      fetchError = `Falha ao processar resposta do TSE: ${parseErr.message}`;
     }
   }
-
-  // Populate metadata
-  const finalData: ElectionData = {
-    ...currentState.data,
-    lastFetchedAt,
-    dataUpdatedAt: currentState.dataUpdatedAt
-  };
 
   return {
     success: true,
@@ -142,6 +120,10 @@ export async function getOrFetchElectionData(
     fetchError,
     lastFetchedAt,
     dataUpdatedAt: currentState.dataUpdatedAt,
-    data: finalData
+    presidentialData: {
+      ...currentState.data,
+      lastFetchedAt,
+      dataUpdatedAt: currentState.dataUpdatedAt || '2026-10-25T20:30:00.000Z'
+    }
   };
 }
