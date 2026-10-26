@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-const PERSISTENT_CACHE_FILE = path.join('/tmp', 'tse_clean_cache_v8.json');
+const PERSISTENT_CACHE_FILE = path.join('/tmp', 'tse_clean_cache_v9.json');
 
 // Whitelisted scopes and official TSE base URL
 export const ALLOWED_SCOPES = [
@@ -22,14 +22,31 @@ export const ALLOWED_SCOPES = [
 
 export type TseScope = typeof ALLOWED_SCOPES[number];
 
-// Election IDs for 2026 (or standard presidential election cycle)
-const ELECTION_CODE_T2 = '545';
-const ELECTION_CODE_T1 = '544';
+// Official TSE 2026 Election Codes
+// 6257: Eleição Federal Ordinária 2026 - 1º Turno (Presidente da República)
+// 6258: Eleição Federal Ordinária 2026 - 2º Turno (Presidente da República)
+export const OFFICIAL_ELECTION_CODE_T1_2026 = '6257';
+export const OFFICIAL_ELECTION_CODE_T2_2026 = '6258';
 
-function buildOfficialTseUrl(scope: TseScope, turn: 1 | 2 = 2): string {
+export const TSE_CONFIG_URL = 'https://resultados.tse.jus.br/oficial/ele2026/config/ele2026-config.json';
+
+function getOfficialElectionCode(turn: 1 | 2): string {
+  return turn === 1 ? OFFICIAL_ELECTION_CODE_T1_2026 : OFFICIAL_ELECTION_CODE_T2_2026;
+}
+
+/**
+ * Builds official 2026 TSE URLs for full results and simplified results
+ */
+function buildOfficialTseUrls(scope: TseScope, turn: 1 | 2 = 2): string[] {
   const scopeLower = scope.toLowerCase();
-  const eleCode = turn === 2 ? ELECTION_CODE_T2 : ELECTION_CODE_T1;
-  return `https://resultados.tse.jus.br/oficial/ele2026/${eleCode}/dados-simplificados/${scopeLower}/${scopeLower}-c0001-e000${eleCode}-r.json`;
+  const eleCode = getOfficialElectionCode(turn);
+
+  return [
+    // 1. Leiaute completo de resultados 2026 (dados com 'abr' e 'cand')
+    `https://resultados.tse.jus.br/oficial/ele2026/${eleCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${eleCode}-r.json`,
+    // 2. Leiaute simplificado 2026
+    `https://resultados.tse.jus.br/oficial/ele2026/${eleCode}/dados-simplificados/${scopeLower}/${scopeLower}-c0001-e00${eleCode}-r.json`
+  ];
 }
 
 interface CacheState {
@@ -122,7 +139,23 @@ async function fetchTseEndpointSecurely(url: string): Promise<{ ok: boolean; sta
 }
 
 /**
- * Service orchestrator for fetching TSE official data with multi-scope support,
+ * Attempts to discover active election configuration published by TSE
+ */
+export async function fetchTseElectionConfig(): Promise<{ success: boolean; config?: any; error?: string }> {
+  const result = await fetchTseEndpointSecurely(TSE_CONFIG_URL);
+  if (result.ok && result.text) {
+    try {
+      const json = JSON.parse(result.text);
+      return { success: true, config: json };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, error: result.error };
+}
+
+/**
+ * Service orchestrator for fetching TSE official 2026 data with multi-scope support,
  * strict provenance attribution, and safe fallback.
  */
 export async function getOrFetchElectionData(params?: {
@@ -138,56 +171,60 @@ export async function getOrFetchElectionData(params?: {
     : 'BR';
 
   const turn: 1 | 2 = params?.turn === 1 ? 1 : 2;
-  const officialUrl = buildOfficialTseUrl(validScope, turn);
+  const officialCandidateUrls = buildOfficialTseUrls(validScope, turn);
 
   const cache = loadPersistentCache();
   cache.lastAttemptedFetchAt = lastAttemptedFetchAt;
-
-  // 1. Perform secured network fetch to official TSE endpoint
-  const networkResult = await fetchTseEndpointSecurely(officialUrl);
 
   let fetchStatus: FetchStatus = 'CACHE_FALLBACK';
   let isLive = false;
   let fetchError: string | null = null;
   let provenance: DataProvenance = cache.data.audit?.provenance || 'DEMONSTRATIVE_BASELINE';
 
-  if (networkResult.ok && networkResult.text) {
-    try {
-      const rawHash = crypto.createHash('sha256').update(networkResult.text).digest('hex');
-      const rawJson: TseRawJson = JSON.parse(networkResult.text);
+  // Try candidate URLs in order (full results first, then simplified)
+  for (const officialUrl of officialCandidateUrls) {
+    const networkResult = await fetchTseEndpointSecurely(officialUrl);
 
-      // Parse with strict TSE parser and mark source as officially verified
-      const parsedResult = parseTseOfficialJson(rawJson, {
-        sourceVerified: true,
-        provenance: 'OFFICIAL_TSE_LIVE',
-        sourceUrl: officialUrl,
-        rawContentHash: rawHash,
-        existingData: cache.data
-      });
+    if (networkResult.ok && networkResult.text) {
+      try {
+        const rawHash = crypto.createHash('sha256').update(networkResult.text).digest('hex');
+        const rawJson: TseRawJson = JSON.parse(networkResult.text);
 
-      if (parsedResult.success && parsedResult.data) {
-        isLive = true;
-        provenance = 'OFFICIAL_TSE_LIVE';
-        cache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
+        // Parse with strict TSE 2026 parser
+        const parsedResult = parseTseOfficialJson(rawJson, {
+          sourceVerified: true,
+          provenance: 'OFFICIAL_TSE_LIVE',
+          sourceUrl: officialUrl,
+          rawContentHash: rawHash,
+          existingData: cache.data
+        });
 
-        if (rawHash !== cache.contentHash) {
-          fetchStatus = 'LIVE_UPDATED';
-          cache.contentHash = rawHash;
-          cache.version += 1;
-          cache.data = parsedResult.data;
-          cache.sourceScope = validScope;
-          savePersistentCache(cache);
+        if (parsedResult.success && parsedResult.data) {
+          isLive = true;
+          provenance = 'OFFICIAL_TSE_LIVE';
+          cache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
+
+          if (rawHash !== cache.contentHash) {
+            fetchStatus = 'LIVE_UPDATED';
+            cache.contentHash = rawHash;
+            cache.version += 1;
+            cache.data = parsedResult.data;
+            cache.sourceScope = validScope;
+            savePersistentCache(cache);
+          } else {
+            fetchStatus = 'LIVE_UNCHANGED';
+          }
+          fetchError = null;
+          break; // Successfully loaded official data
         } else {
-          fetchStatus = 'LIVE_UNCHANGED';
+          fetchError = parsedResult.errors?.join('; ') || 'Formato de resposta incompatível com o leiaute TSE 2026.';
         }
-      } else {
-        fetchError = parsedResult.errors?.join('; ') || 'Formato de resposta incompatível com o esquema do TSE.';
+      } catch (parseErr: any) {
+        fetchError = `Falha ao interpretar resposta do TSE 2026: ${parseErr.message}`;
       }
-    } catch (parseErr: any) {
-      fetchError = `Falha ao interpretar resposta do TSE: ${parseErr.message}`;
+    } else {
+      fetchError = networkResult.error || `Servidor do TSE indisponível (HTTP ${networkResult.status}).`;
     }
-  } else {
-    fetchError = networkResult.error || `Servidor do TSE indisponível (HTTP ${networkResult.status}).`;
   }
 
   // If live fetch failed, distinguish between official cached data vs demonstrative baseline
