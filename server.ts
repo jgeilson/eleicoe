@@ -76,8 +76,34 @@ const handleApiRequest = async (req: express.Request, res: express.Response) => 
       });
     }
 
-    const rawTurn = Number(req.query?.turn || req.body?.turn || 2);
-    const turn = rawTurn === 1 ? 1 : 2;
+    // P0: Strict Turn Validation - Rejects any turn different from 1 or 2
+    let turn: 1 | 2 = 2;
+    const providedTurn = req.query?.turn ?? req.body?.turn;
+    if (providedTurn !== undefined) {
+      const turnStr = String(providedTurn).trim();
+      if (turnStr !== '1' && turnStr !== '2') {
+        return res.status(400).json({
+          success: false,
+          requestSucceeded: false,
+          dataAvailable: false,
+          dataIsOfficial: false,
+          status: 'FETCH_ERROR',
+          provenance: 'DEMONSTRATIVE_BASELINE',
+          scope: rawScope,
+          turn: 2,
+          isLive: false,
+          isStale: false,
+          dataAgeSeconds: null,
+          fetchError: `Turno inválido: "${providedTurn}". O turno da eleição presidencial deve ser estritamente 1 ou 2.`,
+          lastSuccessfulFetchAt: null,
+          lastContentChangeAt: null,
+          lastAttemptedFetchAt: new Date().toISOString(),
+          dataHoraGeracaoTse: null,
+          presidentialData: null
+        });
+      }
+      turn = turnStr === '1' ? 1 : 2;
+    }
 
     const result = await getOrFetchElectionData({ scope: rawScope, turn });
     return res.json(result);

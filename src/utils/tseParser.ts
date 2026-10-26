@@ -168,6 +168,16 @@ export function parseTseOfficialJson(
     );
   }
 
+  // 2.5. Strict Presidential Cargo Validation (Issue 6.1: Mandatory when present)
+  if (rawJson.carag !== undefined && rawJson.carag !== null && String(rawJson.carag).trim() !== '') {
+    const caragStr = String(rawJson.carag).trim();
+    if (caragStr !== '1') {
+      errors.push(
+        `Cargo incompatível: esperado código "1" (Presidente da República), recebido "${rawJson.carag}".`
+      );
+    }
+  }
+
   // 3. Strict Scope / Abrangência Matching (P0 & P1)
   const targetScope = options.expectedScope.toUpperCase();
   let matchedAbr: TseRawAbr | undefined;
@@ -199,11 +209,11 @@ export function parseTseOfficialJson(
     return { success: false, errors };
   }
 
-  // 4. Extract Candidate list from the matched scope
+  // 4. Extract Candidate list strictly from the matched scope
   const rawCandidates: TseRawCandidate[] =
     matchedAbr?.cand && Array.isArray(matchedAbr.cand) && matchedAbr.cand.length > 0
       ? matchedAbr.cand
-      : Array.isArray(rawJson.cand) && rawJson.cand.length > 0
+      : rootMatchesScope && Array.isArray(rawJson.cand) && rawJson.cand.length > 0
       ? rawJson.cand
       : [];
 
@@ -212,10 +222,13 @@ export function parseTseOfficialJson(
     return { success: false, errors };
   }
 
-  // 5. Extract Electoral Metrics strictly for the matched scope
-  const totalSections = parseSafeInt(matchedAbr?.s ?? rawJson.s);
-  const totalizedSections = parseSafeInt(matchedAbr?.st ?? rawJson.st);
-  const pstNumber = parseSafeFloat(matchedAbr?.pst ?? rawJson.pst);
+  // 5. Extract Electoral Metrics strictly for the matched scope (Issue 6.2)
+  // If matchedAbr is defined, use its metrics exclusively.
+  // ONLY use root metrics if root itself matches the targetScope!
+  const metricsSource = matchedAbr || (rootMatchesScope ? rawJson : null);
+  const totalSections = parseSafeInt(metricsSource?.s);
+  const totalizedSections = parseSafeInt(metricsSource?.st);
+  const pstNumber = parseSafeFloat(metricsSource?.pst);
 
   if (totalSections === null) {
     warnings.push('Campo "s" (total de seções) ausente ou inválido no arquivo oficial.');
@@ -227,11 +240,11 @@ export function parseTseOfficialJson(
     warnings.push('Campo "pst" (percentual totalizado) ausente ou inválido.');
   }
 
-  const validVotes = parseSafeInt(matchedAbr?.vvc ?? rawJson.vvc);
-  const nullVotes = parseSafeInt(matchedAbr?.vn ?? rawJson.vn);
-  const blankVotes = parseSafeInt(matchedAbr?.vb ?? rawJson.vb);
-  const abstentions = parseSafeInt(matchedAbr?.a ?? rawJson.a);
-  const votersEligible = parseSafeInt(matchedAbr?.ea ?? rawJson.ea);
+  const validVotes = parseSafeInt(metricsSource?.vvc);
+  const nullVotes = parseSafeInt(metricsSource?.vn);
+  const blankVotes = parseSafeInt(metricsSource?.vb);
+  const abstentions = parseSafeInt(metricsSource?.a);
+  const votersEligible = parseSafeInt(metricsSource?.ea);
 
   // 6. Parse Candidates safely: candidate number is null if missing, NEVER 0 (Issue 6.2)
   const candidateResults: CandidateResult[] = rawCandidates.map((c, idx) => {
@@ -276,8 +289,8 @@ export function parseTseOfficialJson(
   // - AGUARDANDO: se a apuração ainda não começou
   let status: 'ELEIÇÃO DEFINIDA' | 'TOTALIZADO' | 'EM APURAÇÃO' | 'AGUARDANDO' = 'EM APURAÇÃO';
 
-  const isTotalizationFinished = (matchedAbr?.tf ?? rawJson.tf) === 's' || (pstNumber !== null && pstNumber >= 100);
-  const isSituationSettled = (matchedAbr?.esae ?? rawJson.esae) === 's';
+  const isTotalizationFinished = (metricsSource?.tf) === 's' || (pstNumber !== null && pstNumber >= 100);
+  const isSituationSettled = (metricsSource?.esae) === 's';
   const hasElectedCandidate = candidateResults.some((c) => c.status === 'Eleito' || c.status === 'Eleito por QP');
 
   if (isSituationSettled || (hasElectedCandidate && isTotalizationFinished)) {

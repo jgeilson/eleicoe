@@ -16,15 +16,37 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-const SCOPED_CACHE_DIR = path.join('/tmp', 'tse_scoped_cache_v11');
+// Durable cache directory with fallback to /tmp if necessary
+function resolveCacheDirectory(): string {
+  const preferredDir = path.resolve(process.cwd(), 'data', 'tse_cache');
+  try {
+    if (!fs.existsSync(preferredDir)) {
+      fs.mkdirSync(preferredDir, { recursive: true });
+    }
+    // Verify write permissions
+    const testFile = path.join(preferredDir, '.write_test');
+    fs.writeFileSync(testFile, 'ok', 'utf8');
+    fs.unlinkSync(testFile);
+    return preferredDir;
+  } catch {
+    const tmpDir = path.join('/tmp', 'tse_scoped_cache_v11');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    return tmpDir;
+  }
+}
+
+const SCOPED_CACHE_DIR = resolveCacheDirectory();
 const SNAPSHOTS_LEDGER_FILE = path.join(SCOPED_CACHE_DIR, 'snapshots_ledger_v11.json');
+const SNAPSHOTS_RAW_DIR = path.join(SCOPED_CACHE_DIR, 'raw_snapshots');
 
 try {
-  if (!fs.existsSync(SCOPED_CACHE_DIR)) {
-    fs.mkdirSync(SCOPED_CACHE_DIR, { recursive: true });
+  if (!fs.existsSync(SNAPSHOTS_RAW_DIR)) {
+    fs.mkdirSync(SNAPSHOTS_RAW_DIR, { recursive: true });
   }
 } catch (err) {
-  console.warn('Erro ao criar diretório de cache do TSE:', err);
+  console.warn('Erro ao criar diretório de snapshots brutos:', err);
 }
 
 // Whitelisted scopes (National BR, Exterior ZZ, and all 27 UFs)
@@ -52,16 +74,23 @@ export interface ActiveElectionConfig {
   codeTurno2: string;
   source: 'TSE_OFFICIAL_CONFIG' | 'VALIDATED_FALLBACK';
   details?: string;
+  cycle?: string;
+  electionName?: string;
 }
 
 let activeConfigCache: ActiveElectionConfig | null = null;
 
 /**
- * P0: Consults and parses the official general catalog of elections (ele-c.json)
- * according to TSE specification.
+ * P0: Consults and parses the official general catalog of elections (ele-c.json).
+ * Follows the TSE official structure:
+ * 1. Cycle: identifies pl[].c === "ele2026"
+ * 2. Cargo: locates presidential cargo inside pl[].e[].abr[].cp[] where cd === "1"
+ * 3. Codes: extracts 1º Turno from 'cd' (t === "1") and 2º Turno from 'cdt2'
+ * 4. Strict validation: rejects ambiguous/incompatible configs
+ * 5. Uses VALIDATED_FALLBACK only when catalog inquiry or validation fails.
  */
-export async function resolveActiveElectionConfig(): Promise<ActiveElectionConfig> {
-  if (activeConfigCache) {
+export async function resolveActiveElectionConfig(forceRefresh: boolean = false): Promise<ActiveElectionConfig> {
+  if (activeConfigCache && !forceRefresh) {
     return activeConfigCache;
   }
 
@@ -82,21 +111,37 @@ export async function resolveActiveElectionConfig(): Promise<ActiveElectionConfi
 
       let foundT1: string | null = null;
       let foundT2: string | null = null;
+      let electionName: string | null = null;
 
-      // Navigate pleitos (pl) -> eleições (e)
+      // 1. Identify election cycle 'ele2026' in pleitos catalog.pl
       if (Array.isArray(catalog?.pl)) {
         for (const pleito of catalog.pl) {
-          if (Array.isArray(pleito?.e)) {
+          if (pleito?.c === 'ele2026' && Array.isArray(pleito?.e)) {
             for (const eleicao of pleito.e) {
-              const hasPresident = Array.isArray(eleicao?.car)
-                ? eleicao.car.some((c: any) => String(c.cd) === '1')
-                : eleicao?.tp === 'F' || eleicao?.tp === '1';
-
-              if (hasPresident) {
-                if (eleicao.t === '1' && !foundT1 && eleicao.cd) {
-                  foundT1 = String(eleicao.cd);
+              // 2. Locate presidential cargo inside abr[].cp[] where cd === "1"
+              let hasPresidentialCargo = false;
+              if (Array.isArray(eleicao?.abr)) {
+                for (const abr of eleicao.abr) {
+                  if (Array.isArray(abr?.cp)) {
+                    if (abr.cp.some((cp: any) => String(cp.cd) === '1')) {
+                      hasPresidentialCargo = true;
+                      break;
+                    }
+                  }
                 }
-                if (eleicao.t === '2' && !foundT2 && eleicao.cd) {
+              }
+
+              if (hasPresidentialCargo) {
+                // 3. Read 1º Turno code from cd and 2º Turno code from cdt2
+                if (eleicao.t === '1' && eleicao.cd) {
+                  foundT1 = String(eleicao.cd);
+                  electionName = eleicao.nm || 'Eleição Ordinária Federal - 2026 1º Turno';
+                  if (eleicao.cdt2) {
+                    foundT2 = String(eleicao.cdt2);
+                  }
+                }
+                // Also check if 2nd turn is declared in a separate election object
+                if (eleicao.t === '2' && eleicao.cd && !foundT2) {
                   foundT2 = String(eleicao.cd);
                 }
               }
@@ -105,28 +150,33 @@ export async function resolveActiveElectionConfig(): Promise<ActiveElectionConfi
         }
       }
 
-      if (foundT1 && foundT2) {
+      // 4. Strict validation: accept ONLY if both turn codes are valid numbers and not empty
+      if (foundT1 && foundT2 && /^\d+$/.test(foundT1) && /^\d+$/.test(foundT2)) {
         activeConfigCache = {
           discoveredAt: new Date().toISOString(),
           codeTurno1: foundT1,
           codeTurno2: foundT2,
+          cycle: 'ele2026',
+          electionName: electionName || 'Eleição Ordinária Federal - 2026',
           source: 'TSE_OFFICIAL_CONFIG',
-          details: `Configuração oficial do catálogo ele-c.json (1ºT: ${foundT1}, 2ºT: ${foundT2})`
+          details: `Configuração oficial descoberta dinamicamente via catálogo ele-c.json (${electionName} • 1ºT: ${foundT1}, 2ºT: ${foundT2})`
         };
         return activeConfigCache;
       }
     }
   } catch (err: any) {
-    // Expected when CDN has not yet published or during offline dev
+    // Handled below with explicit VALIDATED_FALLBACK
   }
 
-  // Explicit documented fallback - marked as VALIDATED_FALLBACK
+  // 5. Use VALIDATED_FALLBACK only when catalog inquiry or validation fails
   activeConfigCache = {
     discoveredAt: new Date().toISOString(),
     codeTurno1: OFFICIAL_ELECTION_CODE_T1_2026,
     codeTurno2: OFFICIAL_ELECTION_CODE_T2_2026,
+    cycle: 'ele2026',
+    electionName: 'Eleição Ordinária Federal - 2026 (Documentada)',
     source: 'VALIDATED_FALLBACK',
-    details: `Códigos oficiais documentados para 2026 (1ºT: ${OFFICIAL_ELECTION_CODE_T1_2026}, 2ºT: ${OFFICIAL_ELECTION_CODE_T2_2026})`
+    details: `Fallback validado com códigos documentados para 2026 (1ºT: ${OFFICIAL_ELECTION_CODE_T1_2026}, 2ºT: ${OFFICIAL_ELECTION_CODE_T2_2026})`
   };
   return activeConfigCache;
 }
@@ -210,9 +260,9 @@ function saveScopedCache(entry: ScopedCacheEntry) {
 }
 
 /**
- * P2: Full Snapshot Recording with Per-Scope Retention Policy
+ * P2: Full Snapshot Recording with Durable Raw Storage and Per-Scope Retention Policy
  */
-function recordFullSnapshot(metadata: TseSnapshotMetadata) {
+function recordFullSnapshot(metadata: TseSnapshotMetadata, rawJsonText?: string) {
   try {
     let ledger: TseSnapshotMetadata[] = [];
     if (fs.existsSync(SNAPSHOTS_LEDGER_FILE)) {
@@ -221,6 +271,16 @@ function recordFullSnapshot(metadata: TseSnapshotMetadata) {
     }
 
     ledger.unshift(metadata);
+
+    // Save full raw JSON to disk for 100% complete audit reconstruction
+    if (rawJsonText) {
+      try {
+        const rawFilePath = path.join(SNAPSHOTS_RAW_DIR, `snapshot_${metadata.snapshotId}.json`);
+        fs.writeFileSync(rawFilePath, rawJsonText, 'utf8');
+      } catch (saveErr) {
+        console.warn('Aviso ao salvar arquivo JSON bruto do snapshot:', saveErr);
+      }
+    }
 
     // Retention policy: keep up to 100 total snapshots, and at most 20 snapshots per scope
     const scopeCountMap: { [key: string]: number } = {};
@@ -313,6 +373,29 @@ export async function getOrFetchElectionData(params?: {
     };
   }
 
+  // P0: Strict Turn Validation - Rejects any turn different from 1 or 2
+  if (params?.turn !== undefined && params.turn !== 1 && params.turn !== 2) {
+    return {
+      success: false,
+      requestSucceeded: false,
+      dataAvailable: false,
+      dataIsOfficial: false,
+      status: 'FETCH_ERROR',
+      provenance: 'DEMONSTRATIVE_BASELINE',
+      scope: rawScope,
+      turn: 2,
+      isLive: false,
+      isStale: false,
+      dataAgeSeconds: null,
+      fetchError: `Turno inválido: "${params.turn}". O turno deve ser estritamente 1 ou 2.`,
+      lastSuccessfulFetchAt: null,
+      lastContentChangeAt: null,
+      lastAttemptedFetchAt,
+      dataHoraGeracaoTse: null,
+      presidentialData: null
+    };
+  }
+
   const validScope = rawScope as TseScope;
   const turn: 1 | 2 = params?.turn === 1 ? 1 : 2;
 
@@ -368,7 +451,7 @@ export async function getOrFetchElectionData(params?: {
           scopedCache.data.lastContentChangeAt = lastAttemptedFetchAt;
           saveScopedCache(scopedCache);
 
-          // P2: Record full snapshot with candidate list and metrics
+          // P2: Record full snapshot with candidate list, metrics, and raw content
           const activeRound = turn === 2 ? parsedResult.data.turno2 : parsedResult.data.turno1;
           recordFullSnapshot({
             snapshotId: `${cacheKey}_${Date.now()}`,
@@ -385,9 +468,11 @@ export async function getOrFetchElectionData(params?: {
             votersEligible: activeRound.votersEligible,
             abstentions: activeRound.abstentions,
             candidates: activeRound.nationalCandidates
-          });
+          }, networkResult.text);
         } else {
           fetchStatus = 'LIVE_UNCHANGED';
+          // P1: Persist updated lastSuccessfulFetchAt to disk even when content is unchanged!
+          saveScopedCache(scopedCache);
         }
         fetchError = null;
       } else {
@@ -396,8 +481,6 @@ export async function getOrFetchElectionData(params?: {
     } catch (parseErr: any) {
       fetchError = `Falha ao interpretar resposta do TSE: ${parseErr.message}`;
     }
-  } else {
-    fetchError = networkResult.error || `Servidor do TSE indisponível (HTTP ${networkResult.status}).`;
   }
 
   if (!isLive) {

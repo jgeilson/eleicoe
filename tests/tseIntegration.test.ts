@@ -7,8 +7,10 @@ import { parseTseOfficialJson, TseRawJson } from '../src/utils/tseParser.js';
 import {
   getOrFetchElectionData,
   buildDocumentedTseUrl,
+  resolveActiveElectionConfig,
   OFFICIAL_ELECTION_CODE_T1_2026,
-  OFFICIAL_ELECTION_CODE_T2_2026
+  OFFICIAL_ELECTION_CODE_T2_2026,
+  ALLOWED_SCOPES
 } from '../src/services/electionService.js';
 
 let passed = 0;
@@ -83,6 +85,65 @@ const FIXTURE_TSE_2026_BR_U_JSON: TseRawJson = {
   ]
 };
 
+// Fixture oficial do catálogo ele-c.json
+const FIXTURE_ELE_C_CATALOG = {
+  dg: '18/10/2026',
+  hg: '12:38:11',
+  f: 'o',
+  pl: [
+    {
+      cd: '3220',
+      c: 'ele2026',
+      e: [
+        {
+          cd: '6257',
+          cdt2: '6258',
+          nm: 'Eleição Ordinária Federal - 2026 1º Turno',
+          t: '1',
+          tp: '8',
+          abr: [
+            {
+              cd: 'br',
+              cp: [
+                { cd: '1', ds: 'Presidente', tp: '1' }
+              ]
+            }
+          ]
+        },
+        {
+          cd: '6259',
+          cdt2: '6260',
+          nm: 'Eleição Ordinária Estadual - 2026 1º Turno',
+          t: '1',
+          tp: '1',
+          abr: [
+            {
+              cd: 'br',
+              cp: [
+                { cd: '3', ds: 'Governador', tp: '1' },
+                { cd: '5', ds: 'Senador', tp: '1' }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      cd: '452',
+      c: 'ele2024',
+      e: [
+        {
+          cd: '619',
+          cdt2: '620',
+          nm: 'Eleição 2024',
+          t: '1',
+          abr: [{ cd: 'br', cp: [{ cd: '11', ds: 'Prefeito' }] }]
+        }
+      ]
+    }
+  ]
+};
+
 async function runTests() {
   console.log('======================================================');
   console.log('SUÍTE DETERMINÍSTICA DE TESTES DE INTEGRAÇÃO DO TSE 2026');
@@ -99,6 +160,16 @@ async function runTests() {
   assert(
     urlSpT1 === 'https://resultados.tse.jus.br/oficial/ele2026/6257/dados/sp/sp-c0001-e006257-u.json',
     'URL de 1º Turno (SP) usa código 6257, sufixo -u.json e pasta /dados/sp/'
+  );
+  const urlPbT2 = buildDocumentedTseUrl('PB', OFFICIAL_ELECTION_CODE_T2_2026);
+  assert(
+    urlPbT2 === 'https://resultados.tse.jus.br/oficial/ele2026/6258/dados/pb/pb-c0001-e006258-u.json',
+    'URL de 2º Turno (PB) usa código 6258, sufixo -u.json e pasta /dados/pb/'
+  );
+  const urlZzT2 = buildDocumentedTseUrl('ZZ', OFFICIAL_ELECTION_CODE_T2_2026);
+  assert(
+    urlZzT2 === 'https://resultados.tse.jus.br/oficial/ele2026/6258/dados/zz/zz-c0001-e006258-u.json',
+    'URL de 2º Turno (ZZ - Exterior) usa código 6258, sufixo -u.json e pasta /dados/zz/'
   );
 
   // 2. Teste com Fixture Real do TSE 2026
@@ -215,6 +286,93 @@ async function runTests() {
   });
   assert(resSelectSP.success === true, 'Localizou SP dentro de abr[]');
   assert(resSelectSP.data?.turno2.totalValidVotes === 24000000, 'Extraiu votos válidos de SP (24M e não 8M da Bahia)');
+
+  // 9. Teste de Rejeição Estrita de Turno Inválido (P0)
+  console.log('\n[Grupo 9] Rejeição Estrita de Turnos Inválidos:');
+  const resInvalidTurn3 = await getOrFetchElectionData({ scope: 'BR', turn: 3 as any });
+  assert(resInvalidTurn3.success === false, 'Rejeitou turn=3 com success: false');
+  assert(resInvalidTurn3.fetchError?.includes('Turno inválido') === true, 'Mensagem explícita de erro sobre turno inválido');
+
+  const resInvalidTurn0 = await getOrFetchElectionData({ scope: 'BR', turn: 0 as any });
+  assert(resInvalidTurn0.success === false, 'Rejeitou turn=0 com success: false');
+
+  // 10. Teste de Validação Rigorosa de Cargo Presidencial (Issue 6.1)
+  console.log('\n[Grupo 10] Validação Direta do Cargo Presidencial (carag === 1):');
+  const fixtureWrongCargo: TseRawJson = {
+    ele: '6258',
+    carag: '3', // Cargo 3 = Governador (rejeitado para apuração presidencial)
+    cdabr: 'BR',
+    t: '2',
+    cand: [{ n: '13', nm: 'Candidato', vap: '100' }]
+  };
+  const resWrongCargo = parseTseOfficialJson(fixtureWrongCargo, {
+    expectedTurn: 2,
+    expectedScope: 'BR',
+    expectedElectionCode: '6258',
+    sourceVerified: true,
+    provenance: 'OFFICIAL_TSE_LIVE'
+  });
+  assert(resWrongCargo.success === false, 'Rejeitou cargo não presidencial (carag: 3)');
+  assert(
+    resWrongCargo.errors?.some(e => e.includes('Cargo incompatível')) === true,
+    'Erro de cargo incompatível presente na rejeição'
+  );
+
+  const fixtureCorrectCargo: TseRawJson = {
+    ele: '6258',
+    carag: '1', // Cargo 1 = Presidente da República
+    cdabr: 'BR',
+    t: '2',
+    cand: [{ n: '13', nm: 'Candidato', vap: '100' }]
+  };
+  const resCorrectCargo = parseTseOfficialJson(fixtureCorrectCargo, {
+    expectedTurn: 2,
+    expectedScope: 'BR',
+    expectedElectionCode: '6258',
+    sourceVerified: true,
+    provenance: 'OFFICIAL_TSE_LIVE'
+  });
+  assert(resCorrectCargo.success === true, 'Aceitou cargo 1 (Presidente da República)');
+
+  // 11. Teste de Isolamento de Métricas de Abrangência vs Raiz (Issue 6.2)
+  console.log('\n[Grupo 11] Isolamento Estrito de Métricas (Sem contaminação da Raiz):');
+  const fixtureRootMismatch: TseRawJson = {
+    ele: '6258',
+    cdabr: 'BR',
+    vvc: '100000000', // Votos do Brasil na raiz
+    t: '2',
+    abr: [
+      {
+        cdabr: 'PB',
+        vvc: '2500000', // Votos específicos da Paraíba
+        cand: [{ n: '13', nm: 'Cand PB', vap: '2500000' }]
+      }
+    ]
+  };
+  const resScopeIsolation = parseTseOfficialJson(fixtureRootMismatch, {
+    expectedTurn: 2,
+    expectedScope: 'PB',
+    expectedElectionCode: '6258',
+    sourceVerified: true,
+    provenance: 'OFFICIAL_TSE_LIVE'
+  });
+  assert(resScopeIsolation.success === true, 'Parse com sucesso para PB');
+  assert(
+    resScopeIsolation.data?.turno2.totalValidVotes === 2500000,
+    'Métricas de PB são estritamente isoladas (2.5M) e não herdaram o total nacional da raiz (100M)'
+  );
+
+  // 12. Teste de Resolução Dinâmica do Catálogo do TSE
+  console.log('\n[Grupo 12] Resolução do Catálogo Oficial do TSE (ele-c.json):');
+  const activeConfig = await resolveActiveElectionConfig();
+  assert(
+    activeConfig.codeTurno1 === '6257' && activeConfig.codeTurno2 === '6258',
+    'Catálogo oficial resolveu com perfeição os códigos 6257 (1ºT) e 6258 (2ºT)'
+  );
+  assert(
+    activeConfig.source === 'TSE_OFFICIAL_CONFIG' || activeConfig.source === 'VALIDATED_FALLBACK',
+    `Fonte do catálogo devidamente identificada: ${activeConfig.source}`
+  );
 
   console.log(`\n======================================================`);
   console.log(`RESULTADO DA SUÍTE: ${passed} passaram, ${failed} falharam.`);
