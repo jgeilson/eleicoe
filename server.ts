@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getOrFetchElectionData } from './src/services/electionService.js';
+import { getOrFetchElectionData, ALLOWED_SCOPES } from './src/services/electionService.js';
 
 dotenv.config();
 
@@ -34,13 +34,19 @@ const handleApiRequest = async (req: express.Request, res: express.Response) => 
     if (req.query?.url || req.body?.url) {
       return res.status(400).json({
         success: false,
+        requestSucceeded: false,
+        dataAvailable: false,
+        dataIsOfficial: false,
         status: 'FETCH_ERROR',
         provenance: 'DEMONSTRATIVE_BASELINE',
         scope: 'BR',
+        turn: 2,
         isLive: false,
         isStale: false,
+        dataAgeSeconds: null,
         fetchError: 'Segurança (SSRF): Parâmetro "url" arbitrário é estritamente proibido. Use "scope" (ex: BR, SP, RJ, ZZ).',
         lastSuccessfulFetchAt: null,
+        lastContentChangeAt: null,
         lastAttemptedFetchAt: new Date().toISOString(),
         dataHoraGeracaoTse: null,
         presidentialData: null
@@ -48,6 +54,28 @@ const handleApiRequest = async (req: express.Request, res: express.Response) => 
     }
 
     const rawScope = ((req.query?.scope || req.body?.scope || 'BR') as string).toUpperCase();
+    if (!(ALLOWED_SCOPES as readonly string[]).includes(rawScope)) {
+      return res.status(400).json({
+        success: false,
+        requestSucceeded: false,
+        dataAvailable: false,
+        dataIsOfficial: false,
+        status: 'FETCH_ERROR',
+        provenance: 'DEMONSTRATIVE_BASELINE',
+        scope: rawScope,
+        turn: 2,
+        isLive: false,
+        isStale: false,
+        dataAgeSeconds: null,
+        fetchError: `Abrangência inválida: "${rawScope}". Escopos permitidos são [BR, ZZ, e as 27 UFs].`,
+        lastSuccessfulFetchAt: null,
+        lastContentChangeAt: null,
+        lastAttemptedFetchAt: new Date().toISOString(),
+        dataHoraGeracaoTse: null,
+        presidentialData: null
+      });
+    }
+
     const rawTurn = Number(req.query?.turn || req.body?.turn || 2);
     const turn = rawTurn === 1 ? 1 : 2;
 

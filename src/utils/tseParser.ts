@@ -64,17 +64,18 @@ export interface TseRawJson {
   tf?: string; // Totalização finalizada ('s'/'n')
   esae?: string; // Situação apurada ('s'/'n')
   cand?: TseRawCandidate[]; // Candidatos na raiz
-  abr?: TseRawAbr[]; // Abrangências (estrutura 2026)
+  abr?: TseRawAbr[]; // Abrangências (estrutura oficial)
 }
 
 export interface ParseOptions {
   expectedTurn: 1 | 2;
   expectedScope: string; // 'BR', 'SP', 'ZZ', etc.
-  expectedElectionCode?: string; // '6257' ou '6258'
+  expectedElectionCode: string; // '6257' ou '6258' (Mandatory for strict validation - Issue 6.1)
   sourceVerified: boolean;
   provenance: DataProvenance;
   sourceUrl?: string;
   rawContentHash?: string;
+  configOrigin?: 'TSE_OFFICIAL_CONFIG' | 'VALIDATED_FALLBACK';
   existingData?: PresidentialElectionData;
 }
 
@@ -89,8 +90,8 @@ export interface ParseResult {
 }
 
 /**
- * Objective, consistent color palette.
- * Colors are assigned deterministically by hashing candidate identity,
+ * Objective, deterministic color palette.
+ * Colors are assigned by hashing candidate identity,
  * without inferring party or political affiliation by ballot number.
  */
 const OBJECTIVE_PALETTE = [
@@ -133,9 +134,11 @@ function parseSafeFloat(val: string | undefined): number | null {
 /**
  * Strictly parses and validates raw TSE JSON.
  * Enforces strict matching of:
- * - Election Code (rejects on mismatch)
- * - Turn (rejects on mismatch)
+ * - Election Code (rejects if mismatch)
+ * - Turn (rejects if mismatch)
  * - Scope / Abrangência (searches specifically for expectedScope in abr[], rejects if divergent)
+ * - Candidate Numbers: never defaults to 0 (preserves null if missing)
+ * - Election Status: preserves distinctions between partial result, totalization finished, and settled election
  */
 export function parseTseOfficialJson(
   rawJson: TseRawJson,
@@ -156,15 +159,13 @@ export function parseTseOfficialJson(
     );
   }
 
-  // 2. Strict Election Code Validation (P0)
-  if (options.expectedElectionCode) {
-    if (!rawJson.ele) {
-      errors.push('Código da eleição ("ele") ausente no cabeçalho do arquivo.');
-    } else if (rawJson.ele !== options.expectedElectionCode) {
-      errors.push(
-        `Código de eleição rejeitado: esperado "${options.expectedElectionCode}", recebido "${rawJson.ele}".`
-      );
-    }
+  // 2. Strict Election Code Validation (P0 / Issue 6.1: Mandatory check)
+  if (!rawJson.ele) {
+    errors.push('Código da eleição ("ele") ausente no cabeçalho do arquivo.');
+  } else if (rawJson.ele !== options.expectedElectionCode) {
+    errors.push(
+      `Código de eleição rejeitado: esperado "${options.expectedElectionCode}", recebido "${rawJson.ele}".`
+    );
   }
 
   // 3. Strict Scope / Abrangência Matching (P0 & P1)
@@ -232,14 +233,14 @@ export function parseTseOfficialJson(
   const abstentions = parseSafeInt(matchedAbr?.a ?? rawJson.a);
   const votersEligible = parseSafeInt(matchedAbr?.ea ?? rawJson.ea);
 
-  // 6. Parse Candidates using objective, non-biased coloring
+  // 6. Parse Candidates safely: candidate number is null if missing, NEVER 0 (Issue 6.2)
   const candidateResults: CandidateResult[] = rawCandidates.map((c, idx) => {
-    const candNumber = parseSafeInt(c.n) || 0;
+    const candNumber = parseSafeInt(c.n); // null if missing/invalid, never converted to 0
     const votes = parseSafeInt(c.vap);
     const percentage = parseSafeFloat(c.pvap);
 
-    const name = c.nmp || c.nm || `Candidato ${candNumber}`;
-    const shortName = c.nm || c.nmp || `Candidato ${candNumber}`;
+    const name = c.nmp || c.nm || (candNumber !== null ? `Candidato ${candNumber}` : `Candidato ${idx + 1}`);
+    const shortName = c.nm || c.nmp || (candNumber !== null ? `Candidato ${candNumber}` : `Candidato ${idx + 1}`);
     const party = c.sgp || (c.cc ? c.cc.split('-')[0].trim() : 'Partido');
 
     let officialStatus = c.st;
@@ -248,11 +249,11 @@ export function parseTseOfficialJson(
       else if (c.e === 'n') officialStatus = 'Não eleito';
     }
 
-    const colorKey = c.sqcand || String(candNumber || idx);
+    const colorKey = c.sqcand || String(candNumber !== null ? candNumber : idx);
     const color = getDeterministicCandidateColor(colorKey, idx);
 
     return {
-      id: c.sqcand || `cand-${candNumber || idx}`,
+      id: c.sqcand || `cand-${candNumber !== null ? candNumber : idx}`,
       name,
       shortName,
       party,
@@ -267,18 +268,26 @@ export function parseTseOfficialJson(
   // Sort candidates by votes descending
   candidateResults.sort((a, b) => (b.votes || 0) - (a.votes || 0));
 
-  // 7. Determine Official Election Status safely
+  // 7. Determine Official Election Status safely (Issue 6.3: preserve distinctions)
+  // - ELEIÇÃO DEFINIDA: apenas se a eleição tiver proclamação/situação apurada oficial (esae === 's')
+  //   OU candidato 'Eleito' com totalização já concluída (tf === 's' ou pst === 100).
+  // - TOTALIZADO: se a apuração de seções concluiu 100%, mas ainda aguarda proclamação oficial
+  // - EM APURAÇÃO: se houver apuração parcial em andamento
+  // - AGUARDANDO: se a apuração ainda não começou
   let status: 'ELEIÇÃO DEFINIDA' | 'TOTALIZADO' | 'EM APURAÇÃO' | 'AGUARDANDO' = 'EM APURAÇÃO';
-  const hasElectedCandidate = candidateResults.some((c) => c.status === 'Eleito' || c.status === 'Eleito por QP');
-  const isTotalizationFinished = (matchedAbr?.tf ?? rawJson.tf) === 's';
-  const isSituationSettled = (matchedAbr?.esae ?? rawJson.esae) === 's';
 
-  if (hasElectedCandidate || isSituationSettled) {
+  const isTotalizationFinished = (matchedAbr?.tf ?? rawJson.tf) === 's' || (pstNumber !== null && pstNumber >= 100);
+  const isSituationSettled = (matchedAbr?.esae ?? rawJson.esae) === 's';
+  const hasElectedCandidate = candidateResults.some((c) => c.status === 'Eleito' || c.status === 'Eleito por QP');
+
+  if (isSituationSettled || (hasElectedCandidate && isTotalizationFinished)) {
     status = 'ELEIÇÃO DEFINIDA';
-  } else if (isTotalizationFinished || (pstNumber !== null && pstNumber >= 100)) {
+  } else if (isTotalizationFinished) {
     status = 'TOTALIZADO';
   } else if (pstNumber === null || pstNumber === 0) {
     status = 'AGUARDANDO';
+  } else {
+    status = 'EM APURAÇÃO';
   }
 
   const dataHoraTse =
@@ -311,6 +320,7 @@ export function parseTseOfficialJson(
     codigoEleicao: rawJson.ele || options.expectedElectionCode,
     codigoAbrangencia: targetScope,
     contentHash: options.rawContentHash,
+    configOrigin: options.configOrigin,
     importedAt: new Date().toISOString(),
     validationWarnings: warnings.length > 0 ? warnings : undefined
   };

@@ -24,40 +24,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.query?.url || req.body?.url) {
       return res.status(400).json({
         success: false,
+        requestSucceeded: false,
+        dataAvailable: false,
+        dataIsOfficial: false,
         status: 'FETCH_ERROR',
         provenance: 'DEMONSTRATIVE_BASELINE',
         scope: 'BR',
+        turn: 2,
         isLive: false,
         isStale: false,
+        dataAgeSeconds: null,
         fetchError: 'Segurança (SSRF): Parâmetro "url" arbitrário é estritamente proibido. Use "scope" (ex: BR, SP, RJ, ZZ).',
         lastSuccessfulFetchAt: null,
+        lastContentChangeAt: null,
         lastAttemptedFetchAt: new Date().toISOString(),
         dataHoraGeracaoTse: null,
         presidentialData: null
       });
     }
 
-    // Validate scope (defaults to 'BR')
+    // P1: Validate scope strictly - Reject invalid scopes instead of silently substituting BR (Issue 7)
     const rawScope = ((req.query?.scope || req.body?.scope || 'BR') as string).toUpperCase();
-    const scope = (ALLOWED_SCOPES as readonly string[]).includes(rawScope) ? rawScope : 'BR';
+    if (!(ALLOWED_SCOPES as readonly string[]).includes(rawScope)) {
+      return res.status(400).json({
+        success: false,
+        requestSucceeded: false,
+        dataAvailable: false,
+        dataIsOfficial: false,
+        status: 'FETCH_ERROR',
+        provenance: 'DEMONSTRATIVE_BASELINE',
+        scope: rawScope,
+        turn: 2,
+        isLive: false,
+        isStale: false,
+        dataAgeSeconds: null,
+        fetchError: `Abrangência inválida: "${rawScope}". Escopos permitidos são [BR, ZZ, e as 27 UFs].`,
+        lastSuccessfulFetchAt: null,
+        lastContentChangeAt: null,
+        lastAttemptedFetchAt: new Date().toISOString(),
+        dataHoraGeracaoTse: null,
+        presidentialData: null
+      });
+    }
 
-    // Validate turn (defaults to 2)
+    // Validate turn (1 or 2, defaults to 2)
     const rawTurn = Number(req.query?.turn || req.body?.turn || 2);
     const turn = rawTurn === 1 ? 1 : 2;
 
-    const result = await getOrFetchElectionData({ scope, turn });
+    const result = await getOrFetchElectionData({ scope: rawScope, turn });
 
     return res.status(200).json(result);
   } catch (error: any) {
     return res.status(500).json({
       success: false,
+      requestSucceeded: false,
+      dataAvailable: false,
+      dataIsOfficial: false,
       status: 'FETCH_ERROR',
       provenance: 'DEMONSTRATIVE_BASELINE',
       scope: 'BR',
+      turn: 2,
       isLive: false,
       isStale: false,
+      dataAgeSeconds: null,
       fetchError: error.message || 'Erro interno no servidor de consulta ao TSE.',
       lastSuccessfulFetchAt: null,
+      lastContentChangeAt: null,
       lastAttemptedFetchAt: new Date().toISOString(),
       dataHoraGeracaoTse: null,
       presidentialData: null

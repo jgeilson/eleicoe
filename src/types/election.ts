@@ -20,6 +20,7 @@ export interface ProvenanceAudit {
   codigoAbrangencia?: string; // BR, ZZ, SP, etc.
   contentHash?: string; // sha256 of raw received content
   importedAt: string;
+  configOrigin?: 'TSE_OFFICIAL_CONFIG' | 'VALIDATED_FALLBACK';
   validationWarnings?: string[];
 }
 
@@ -28,7 +29,7 @@ export interface CandidateResult {
   name: string;
   shortName: string;
   party: string;
-  number: number;
+  number: number | null; // Null if not present, never converted to zero (Issue 6.2)
   color: string;
   votes: number | null;
   percentage: number | null;
@@ -75,6 +76,9 @@ export interface RoundData {
   };
 }
 
+/**
+ * Full Detailed Snapshot for Historical Reconstruction (Issue 4)
+ */
 export interface TseSnapshotMetadata {
   snapshotId: string;
   electionCode: string;
@@ -84,34 +88,47 @@ export interface TseSnapshotMetadata {
   retrievedAt: string;
   contentHash: string;
   totalValidVotes: number | null;
+  totalizedSectionsPct: number | null;
+  totalSections: number | null;
+  totalizedSections: number | null;
+  votersEligible: number | null;
+  abstentions: number | null;
+  candidates: CandidateResult[];
 }
 
 export interface PresidentialElectionData {
   source: string;
   lastFetchedAt: string;
   dataUpdatedAt: string;
+  lastContentChangeAt?: string | null;
   audit: ProvenanceAudit;
   turno1: RoundData;
   turno2: RoundData;
   keyHighlights: string[];
 }
 
-export type FetchStatus = 'LIVE_UPDATED' | 'LIVE_UNCHANGED' | 'CACHE_FALLBACK' | 'FETCH_ERROR';
+export type FetchStatus =
+  | 'LIVE_UPDATED'
+  | 'LIVE_UNCHANGED'
+  | 'CACHE_FALLBACK'
+  | 'FETCH_ERROR'
+  | 'MANUAL_IMPORTED';
 
 export interface ApiResponse {
-  success: boolean; // Backward compatibility
-  requestSucceeded: boolean; // True ONLY if current HTTP request succeeded
-  dataAvailable: boolean; // True if valid data is present for requested scope
-  dataIsOfficial: boolean; // True if data has official provenance
+  success: boolean;
+  requestSucceeded: boolean; // True ONLY if current HTTP fetch succeeded
+  dataAvailable: boolean; // True if non-null electoral data is present
+  dataIsOfficial: boolean; // True if data originates from official TSE
   status: FetchStatus;
   provenance: DataProvenance;
   scope: string; // 'BR', 'ZZ', 'SP', etc.
   turn: 1 | 2;
   isLive: boolean;
   isStale: boolean;
-  dataAgeSeconds: number | null;
+  dataAgeSeconds: number | null; // Calculated from lastContentChangeAt or dataHoraGeracaoTse
   fetchError: string | null;
   lastSuccessfulFetchAt: string | null;
+  lastContentChangeAt: string | null;
   lastAttemptedFetchAt: string;
   dataHoraGeracaoTse: string | null;
   presidentialData: PresidentialElectionData | null;

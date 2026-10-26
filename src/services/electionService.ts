@@ -16,10 +16,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-const SCOPED_CACHE_DIR = path.join('/tmp', 'tse_scoped_cache_v10');
-const SNAPSHOTS_LEDGER_FILE = path.join(SCOPED_CACHE_DIR, 'snapshots_ledger.json');
+const SCOPED_CACHE_DIR = path.join('/tmp', 'tse_scoped_cache_v11');
+const SNAPSHOTS_LEDGER_FILE = path.join(SCOPED_CACHE_DIR, 'snapshots_ledger_v11.json');
 
-// Ensure cache directory exists
 try {
   if (!fs.existsSync(SCOPED_CACHE_DIR)) {
     fs.mkdirSync(SCOPED_CACHE_DIR, { recursive: true });
@@ -28,7 +27,7 @@ try {
   console.warn('Erro ao criar diretório de cache do TSE:', err);
 }
 
-// Whitelisted scopes and official TSE base URL
+// Whitelisted scopes (National BR, Exterior ZZ, and all 27 UFs)
 export const ALLOWED_SCOPES = [
   'BR', 'ZZ',
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
@@ -38,26 +37,28 @@ export const ALLOWED_SCOPES = [
 
 export type TseScope = typeof ALLOWED_SCOPES[number];
 
-// Official TSE 2026 Election Codes
-// 6257: Eleição Federal 2026 - 1º Turno (Presidente)
-// 6258: Eleição Federal 2026 - 2º Turno (Presidente)
+// Official Documented Election Codes for 2026
+// 6257: Eleição Ordinária Federal 2026 - 1º Turno (Presidente da República)
+// 6258: Eleição Ordinária Federal 2026 - 2º Turno (Presidente da República)
 export const OFFICIAL_ELECTION_CODE_T1_2026 = '6257';
 export const OFFICIAL_ELECTION_CODE_T2_2026 = '6258';
 
-export const TSE_CONFIG_URL = 'https://resultados.tse.jus.br/oficial/ele2026/config/ele2026-config.json';
+// Official Catalog URL documented by TSE
+export const TSE_CATALOG_URL = 'https://resultados.tse.jus.br/oficial/comum/config/ele-c.json';
 
-interface ActiveElectionConfig {
+export interface ActiveElectionConfig {
   discoveredAt: string;
   codeTurno1: string;
   codeTurno2: string;
   source: 'TSE_OFFICIAL_CONFIG' | 'VALIDATED_FALLBACK';
+  details?: string;
 }
 
 let activeConfigCache: ActiveElectionConfig | null = null;
 
 /**
- * Reads official TSE election configuration if accessible,
- * with explicit fallback to 2026 federal codes (6257 / 6258).
+ * P0: Consults and parses the official general catalog of elections (ele-c.json)
+ * according to TSE specification.
  */
 export async function resolveActiveElectionConfig(): Promise<ActiveElectionConfig> {
   if (activeConfigCache) {
@@ -65,54 +66,79 @@ export async function resolveActiveElectionConfig(): Promise<ActiveElectionConfi
   }
 
   try {
-    const response = await fetch(TSE_CONFIG_URL, {
+    const response = await fetch(TSE_CATALOG_URL, {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*'
       },
       redirect: 'error',
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(6000)
     });
 
     if (response.ok) {
       const text = await response.text();
-      const json = JSON.parse(text);
+      const catalog = JSON.parse(text);
 
-      // Extract active election code from official configuration if published
-      const t1Code = json?.eleicoes?.find((e: any) => e.t === '1' && e.carag === '1')?.cd || OFFICIAL_ELECTION_CODE_T1_2026;
-      const t2Code = json?.eleicoes?.find((e: any) => e.t === '2' && e.carag === '1')?.cd || OFFICIAL_ELECTION_CODE_T2_2026;
+      let foundT1: string | null = null;
+      let foundT2: string | null = null;
 
-      activeConfigCache = {
-        discoveredAt: new Date().toISOString(),
-        codeTurno1: String(t1Code),
-        codeTurno2: String(t2Code),
-        source: 'TSE_OFFICIAL_CONFIG'
-      };
-      return activeConfigCache;
+      // Navigate pleitos (pl) -> eleições (e)
+      if (Array.isArray(catalog?.pl)) {
+        for (const pleito of catalog.pl) {
+          if (Array.isArray(pleito?.e)) {
+            for (const eleicao of pleito.e) {
+              const hasPresident = Array.isArray(eleicao?.car)
+                ? eleicao.car.some((c: any) => String(c.cd) === '1')
+                : eleicao?.tp === 'F' || eleicao?.tp === '1';
+
+              if (hasPresident) {
+                if (eleicao.t === '1' && !foundT1 && eleicao.cd) {
+                  foundT1 = String(eleicao.cd);
+                }
+                if (eleicao.t === '2' && !foundT2 && eleicao.cd) {
+                  foundT2 = String(eleicao.cd);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (foundT1 && foundT2) {
+        activeConfigCache = {
+          discoveredAt: new Date().toISOString(),
+          codeTurno1: foundT1,
+          codeTurno2: foundT2,
+          source: 'TSE_OFFICIAL_CONFIG',
+          details: `Configuração oficial do catálogo ele-c.json (1ºT: ${foundT1}, 2ºT: ${foundT2})`
+        };
+        return activeConfigCache;
+      }
     }
-  } catch (err) {
-    // Config fetch error is expected ahead of election feed publication
+  } catch (err: any) {
+    // Expected when CDN has not yet published or during offline dev
   }
 
+  // Explicit documented fallback - marked as VALIDATED_FALLBACK
   activeConfigCache = {
     discoveredAt: new Date().toISOString(),
     codeTurno1: OFFICIAL_ELECTION_CODE_T1_2026,
     codeTurno2: OFFICIAL_ELECTION_CODE_T2_2026,
-    source: 'VALIDATED_FALLBACK'
+    source: 'VALIDATED_FALLBACK',
+    details: `Códigos oficiais documentados para 2026 (1ºT: ${OFFICIAL_ELECTION_CODE_T1_2026}, 2ºT: ${OFFICIAL_ELECTION_CODE_T2_2026})`
   };
   return activeConfigCache;
 }
 
 /**
- * Builds candidate URLs for the exact scope, election code, and turn
+ * P0: Builds the exact official documented URL for results:
+ * Pattern: .../ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-u.json
+ * Suffix: -u.json (Totalização de cargo)
  */
-function buildOfficialTseUrls(scope: TseScope, turn: 1 | 2, electionCode: string): string[] {
+export function buildDocumentedTseUrl(scope: TseScope, electionCode: string): string {
   const scopeLower = scope.toLowerCase();
-  return [
-    `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-r.json`,
-    `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados-simplificados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-r.json`
-  ];
+  return `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-u.json`;
 }
 
 interface ScopedCacheEntry {
@@ -123,10 +149,10 @@ interface ScopedCacheEntry {
   data: PresidentialElectionData;
   contentHash: string;
   lastSuccessfulFetchAt: string | null;
+  lastContentChangeAt: string | null;
   lastAttemptedFetchAt: string;
 }
 
-// Memory cache sharded strictly by query key (Issue 4: Never share cache across scopes/turns)
 const memoryCacheMap = new Map<string, ScopedCacheEntry>();
 
 function getCacheFilePath(key: string): string {
@@ -165,6 +191,7 @@ function loadScopedCache(key: string, electionCode: string, turn: 1 | 2, scope: 
     data: isolatedData,
     contentHash: baselineHash,
     lastSuccessfulFetchAt: null,
+    lastContentChangeAt: null,
     lastAttemptedFetchAt: new Date().toISOString()
   };
 
@@ -183,21 +210,29 @@ function saveScopedCache(entry: ScopedCacheEntry) {
 }
 
 /**
- * Snapshots Ledger Persistence (Issue 6)
+ * P2: Full Snapshot Recording with Per-Scope Retention Policy
  */
-function recordSnapshot(metadata: TseSnapshotMetadata) {
+function recordFullSnapshot(metadata: TseSnapshotMetadata) {
   try {
     let ledger: TseSnapshotMetadata[] = [];
     if (fs.existsSync(SNAPSHOTS_LEDGER_FILE)) {
       const raw = fs.readFileSync(SNAPSHOTS_LEDGER_FILE, 'utf8');
       ledger = JSON.parse(raw);
     }
+
     ledger.unshift(metadata);
-    // Keep last 50 snapshots
-    if (ledger.length > 50) ledger = ledger.slice(0, 50);
-    fs.writeFileSync(SNAPSHOTS_LEDGER_FILE, JSON.stringify(ledger, null, 2), 'utf8');
+
+    // Retention policy: keep up to 100 total snapshots, and at most 20 snapshots per scope
+    const scopeCountMap: { [key: string]: number } = {};
+    const filteredLedger = ledger.filter((snap) => {
+      const key = `${snap.scope}_t${snap.turn}`;
+      scopeCountMap[key] = (scopeCountMap[key] || 0) + 1;
+      return scopeCountMap[key] <= 20;
+    }).slice(0, 100);
+
+    fs.writeFileSync(SNAPSHOTS_LEDGER_FILE, JSON.stringify(filteredLedger, null, 2), 'utf8');
   } catch (err) {
-    console.warn('Erro ao registrar snapshot de auditoria:', err);
+    console.warn('Erro ao registrar snapshot completo de auditoria:', err);
   }
 }
 
@@ -247,13 +282,6 @@ async function fetchTseEndpointSecurely(url: string): Promise<{ ok: boolean; sta
 
 /**
  * Service orchestrator for fetching TSE official 2026 data.
- * Solves:
- * - P0: Scoped cache isolation (key: ${electionCode}_t${turn}_${scope})
- * - P0: Strict election code & scope validation
- * - P1: Configuration-driven election codes
- * - P1: Exact scope matching within abr[]
- * - P1: Explicit requestSucceeded, dataAvailable, dataIsOfficial
- * - P2: Snapshot history recording
  */
 export async function getOrFetchElectionData(params?: {
   scope?: string;
@@ -261,15 +289,34 @@ export async function getOrFetchElectionData(params?: {
 }): Promise<ApiResponse> {
   const lastAttemptedFetchAt = new Date().toISOString();
 
-  // Validate scope against strict whitelist
-  const requestedScope = (params?.scope || 'BR').toUpperCase();
-  const validScope: TseScope = ALLOWED_SCOPES.includes(requestedScope as TseScope)
-    ? (requestedScope as TseScope)
-    : 'BR';
+  // P1: Strict validation of requested scope - REJECT invalid scopes, never silently substitute (Issue 7)
+  const rawScope = (params?.scope || 'BR').toUpperCase();
+  if (!(ALLOWED_SCOPES as readonly string[]).includes(rawScope)) {
+    return {
+      success: false,
+      requestSucceeded: false,
+      dataAvailable: false,
+      dataIsOfficial: false,
+      status: 'FETCH_ERROR',
+      provenance: 'DEMONSTRATIVE_BASELINE',
+      scope: rawScope,
+      turn: params?.turn === 1 ? 1 : 2,
+      isLive: false,
+      isStale: false,
+      dataAgeSeconds: null,
+      fetchError: `Abrangência inválida: "${rawScope}". Escopos permitidos são [BR, ZZ, e as 27 UFs].`,
+      lastSuccessfulFetchAt: null,
+      lastContentChangeAt: null,
+      lastAttemptedFetchAt,
+      dataHoraGeracaoTse: null,
+      presidentialData: null
+    };
+  }
 
+  const validScope = rawScope as TseScope;
   const turn: 1 | 2 = params?.turn === 1 ? 1 : 2;
 
-  // 1. Resolve official election code from TSE configuration (P1)
+  // 1. Resolve official election code from TSE catalog (P0 & P1)
   const electionConfig = await resolveActiveElectionConfig();
   const electionCode = turn === 1 ? electionConfig.codeTurno1 : electionConfig.codeTurno2;
 
@@ -284,66 +331,73 @@ export async function getOrFetchElectionData(params?: {
   let fetchError: string | null = null;
   let provenance: DataProvenance = scopedCache.data.audit?.provenance || 'DEMONSTRATIVE_BASELINE';
 
-  const candidateUrls = buildOfficialTseUrls(validScope, turn, electionCode);
+  // 3. Official Documented URL pattern (-u.json) - No speculative alternatives (P0)
+  const officialDocumentedUrl = buildDocumentedTseUrl(validScope, electionCode);
+  const networkResult = await fetchTseEndpointSecurely(officialDocumentedUrl);
 
-  for (const officialUrl of candidateUrls) {
-    const networkResult = await fetchTseEndpointSecurely(officialUrl);
+  if (networkResult.ok && networkResult.text) {
+    try {
+      const rawHash = crypto.createHash('sha256').update(networkResult.text).digest('hex');
+      const rawJson: TseRawJson = JSON.parse(networkResult.text);
 
-    if (networkResult.ok && networkResult.text) {
-      try {
-        const rawHash = crypto.createHash('sha256').update(networkResult.text).digest('hex');
-        const rawJson: TseRawJson = JSON.parse(networkResult.text);
+      // Strict parse with mandatory expectedElectionCode & expectedScope
+      const parsedResult = parseTseOfficialJson(rawJson, {
+        expectedTurn: turn,
+        expectedScope: validScope,
+        expectedElectionCode: electionCode,
+        sourceVerified: true,
+        provenance: 'OFFICIAL_TSE_LIVE',
+        sourceUrl: officialDocumentedUrl,
+        rawContentHash: rawHash,
+        configOrigin: electionConfig.source,
+        existingData: scopedCache.data
+      });
 
-        // Strict 2026 Parse: validates expectedTurn, expectedScope, and expectedElectionCode!
-        const parsedResult = parseTseOfficialJson(rawJson, {
-          expectedTurn: turn,
-          expectedScope: validScope,
-          expectedElectionCode: electionCode,
-          sourceVerified: true,
-          provenance: 'OFFICIAL_TSE_LIVE',
-          sourceUrl: officialUrl,
-          rawContentHash: rawHash,
-          existingData: scopedCache.data
-        });
+      if (parsedResult.success && parsedResult.data) {
+        requestSucceeded = true;
+        isLive = true;
+        provenance = 'OFFICIAL_TSE_LIVE';
+        scopedCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
 
-        if (parsedResult.success && parsedResult.data) {
-          requestSucceeded = true;
-          isLive = true;
-          provenance = 'OFFICIAL_TSE_LIVE';
-          scopedCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
+        // P1: Check if content ACTUALLY changed to update lastContentChangeAt correctly
+        if (rawHash !== scopedCache.contentHash) {
+          fetchStatus = 'LIVE_UPDATED';
+          scopedCache.contentHash = rawHash;
+          scopedCache.lastContentChangeAt = lastAttemptedFetchAt;
+          scopedCache.data = parsedResult.data;
+          scopedCache.data.lastContentChangeAt = lastAttemptedFetchAt;
+          saveScopedCache(scopedCache);
 
-          if (rawHash !== scopedCache.contentHash) {
-            fetchStatus = 'LIVE_UPDATED';
-            scopedCache.contentHash = rawHash;
-            scopedCache.data = parsedResult.data;
-            saveScopedCache(scopedCache);
-
-            // Record snapshot in persistent ledger (P2)
-            const activeRound = turn === 2 ? parsedResult.data.turno2 : parsedResult.data.turno1;
-            recordSnapshot({
-              snapshotId: `${cacheKey}_${Date.now()}`,
-              electionCode,
-              turn,
-              scope: validScope,
-              dataHoraGeracaoTse: parsedResult.data.audit.dataHoraGeracaoTse,
-              retrievedAt: lastAttemptedFetchAt,
-              contentHash: rawHash,
-              totalValidVotes: activeRound.totalValidVotes
-            });
-          } else {
-            fetchStatus = 'LIVE_UNCHANGED';
-          }
-          fetchError = null;
-          break;
+          // P2: Record full snapshot with candidate list and metrics
+          const activeRound = turn === 2 ? parsedResult.data.turno2 : parsedResult.data.turno1;
+          recordFullSnapshot({
+            snapshotId: `${cacheKey}_${Date.now()}`,
+            electionCode,
+            turn,
+            scope: validScope,
+            dataHoraGeracaoTse: parsedResult.data.audit.dataHoraGeracaoTse,
+            retrievedAt: lastAttemptedFetchAt,
+            contentHash: rawHash,
+            totalValidVotes: activeRound.totalValidVotes,
+            totalizedSectionsPct: activeRound.totalizedSectionsPct,
+            totalSections: activeRound.totalSections,
+            totalizedSections: activeRound.totalizedSections,
+            votersEligible: activeRound.votersEligible,
+            abstentions: activeRound.abstentions,
+            candidates: activeRound.nationalCandidates
+          });
         } else {
-          fetchError = parsedResult.errors?.join('; ') || 'Formato de resposta incompatível com o leiaute do TSE.';
+          fetchStatus = 'LIVE_UNCHANGED';
         }
-      } catch (parseErr: any) {
-        fetchError = `Falha ao interpretar resposta do TSE: ${parseErr.message}`;
+        fetchError = null;
+      } else {
+        fetchError = parsedResult.errors?.join('; ') || 'Formato de resposta incompatível com o leiaute oficial do TSE.';
       }
-    } else {
-      fetchError = networkResult.error || `Servidor do TSE indisponível (HTTP ${networkResult.status}).`;
+    } catch (parseErr: any) {
+      fetchError = `Falha ao interpretar resposta do TSE: ${parseErr.message}`;
     }
+  } else {
+    fetchError = networkResult.error || `Servidor do TSE indisponível (HTTP ${networkResult.status}).`;
   }
 
   if (!isLive) {
@@ -358,13 +412,13 @@ export async function getOrFetchElectionData(params?: {
   const dataIsOfficial = provenance === 'OFFICIAL_TSE_LIVE' || provenance === 'OFFICIAL_TSE_CACHE';
   const isStale = !isLive && dataIsOfficial;
 
-  // Calculate data age in seconds if timestamp exists
+  // P1: Calculate dataAgeSeconds from lastContentChangeAt (or dataHoraGeracaoTse)
   let dataAgeSeconds: number | null = null;
-  if (scopedCache.lastSuccessfulFetchAt) {
-    dataAgeSeconds = Math.round((Date.now() - new Date(scopedCache.lastSuccessfulFetchAt).getTime()) / 1000);
+  const timeBasis = scopedCache.lastContentChangeAt || scopedCache.lastSuccessfulFetchAt;
+  if (timeBasis) {
+    dataAgeSeconds = Math.round((Date.now() - new Date(timeBasis).getTime()) / 1000);
   }
 
-  // Check if data is genuinely available (non-empty candidates and valid votes)
   const activeRound = turn === 2 ? scopedCache.data.turno2 : scopedCache.data.turno1;
   const dataAvailable = activeRound.totalValidVotes !== null && activeRound.totalValidVotes > 0;
 
@@ -382,6 +436,7 @@ export async function getOrFetchElectionData(params?: {
     dataAgeSeconds,
     fetchError,
     lastSuccessfulFetchAt: scopedCache.lastSuccessfulFetchAt,
+    lastContentChangeAt: scopedCache.lastContentChangeAt,
     lastAttemptedFetchAt,
     dataHoraGeracaoTse: scopedCache.data.audit.dataHoraGeracaoTse || null,
     presidentialData: scopedCache.data,

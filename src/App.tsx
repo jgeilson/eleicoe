@@ -186,9 +186,9 @@ export default function App() {
           currentData={presidentialData}
           onSaveData={(newData) => {
             setPresidentialData(newData);
-            setProvenance(newData.audit?.provenance || 'MANUAL_IMPORT_UNVERIFIED');
-            setFetchStatus('LIVE_UPDATED');
-            setRequestSucceeded(true);
+            setProvenance('MANUAL_IMPORT_UNVERIFIED');
+            setFetchStatus('MANUAL_IMPORTED');
+            setRequestSucceeded(false); // Manual import must never pretend to be a live official fetch (Issue 7)
           }}
         />
 

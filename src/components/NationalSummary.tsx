@@ -96,7 +96,7 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
                     className="text-xs font-extrabold px-2 py-0.5 rounded-md text-white shadow-sm"
                     style={{ backgroundColor: candidate.color }}
                   >
-                    {candidate.number > 0 ? candidate.number : '—'}
+                    {candidate.number !== null && candidate.number > 0 ? candidate.number : '—'}
                   </span>
                   <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                     {candidate.party}

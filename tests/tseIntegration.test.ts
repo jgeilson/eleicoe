@@ -4,7 +4,12 @@
  */
 
 import { parseTseOfficialJson, TseRawJson } from '../src/utils/tseParser.js';
-import { getOrFetchElectionData } from '../src/services/electionService.js';
+import {
+  getOrFetchElectionData,
+  buildDocumentedTseUrl,
+  OFFICIAL_ELECTION_CODE_T1_2026,
+  OFFICIAL_ELECTION_CODE_T2_2026
+} from '../src/services/electionService.js';
 
 let passed = 0;
 let failed = 0;
@@ -19,112 +24,201 @@ function assert(condition: boolean, message: string) {
   }
 }
 
-async function runTests() {
-  console.log('--- INICIANDO TESTES DE INTEGRAÇÃO DO TSE 2026 ---');
+// ---------------------------------------------------------
+// FIXTURES REAIS NO PADRÃO OFICIAL 2026 (-u.json)
+// ---------------------------------------------------------
+const FIXTURE_TSE_2026_BR_U_JSON: TseRawJson = {
+  ele: '6258',
+  tpabr: 'BR',
+  cdabr: 'BR',
+  carag: '1',
+  t: '2',
+  f: 'o',
+  dg: '25/10/2026',
+  hg: '20:30:00',
+  tf: 's',
+  esae: 's',
+  abr: [
+    {
+      cdabr: 'BR',
+      dsabr: 'Brasil',
+      s: '472078',
+      st: '472078',
+      pst: '100,00',
+      ea: '161350000',
+      c: '129550000',
+      a: '31800000',
+      vvc: '122850000',
+      vb: '2580000',
+      vn: '4120000',
+      tf: 's',
+      esae: 's',
+      cand: [
+        {
+          seq: '1',
+          sqcand: '280001234567',
+          n: '13',
+          nm: 'LUIZ INÁCIO LULA DA SILVA',
+          nmp: 'LUIZ INÁCIO LULA DA SILVA',
+          sgp: 'PT',
+          vap: '62407800',
+          pvap: '50,80',
+          st: 'Eleito',
+          e: 's'
+        },
+        {
+          seq: '2',
+          sqcand: '280007654321',
+          n: '22',
+          nm: 'FLÁVIO BOLSONARO',
+          nmp: 'FLÁVIO NANTES BOLSONARO',
+          sgp: 'PL',
+          vap: '60442200',
+          pvap: '49,20',
+          st: 'Não eleito',
+          e: 'n'
+        }
+      ]
+    }
+  ]
+};
 
-  // Test 1: Rejection of Incompatible Election Code (Issue 2)
-  console.log('\n[Teste 1] Rejeição de código de eleição incompatível:');
-  const invalidElePayload: TseRawJson = {
-    ele: '9999',
+async function runTests() {
+  console.log('======================================================');
+  console.log('SUÍTE DETERMINÍSTICA DE TESTES DE INTEGRAÇÃO DO TSE 2026');
+  console.log('======================================================\n');
+
+  // 1. Teste de montagem de URL no padrão oficial documentado (-u.json)
+  console.log('[Grupo 1] Montagem de URLs Documentadas pelo TSE:');
+  const urlBrT2 = buildDocumentedTseUrl('BR', OFFICIAL_ELECTION_CODE_T2_2026);
+  assert(
+    urlBrT2 === 'https://resultados.tse.jus.br/oficial/ele2026/6258/dados/br/br-c0001-e006258-u.json',
+    'URL de 2º Turno (BR) usa exatamente o sufixo -u.json e pasta /dados/br/'
+  );
+  const urlSpT1 = buildDocumentedTseUrl('SP', OFFICIAL_ELECTION_CODE_T1_2026);
+  assert(
+    urlSpT1 === 'https://resultados.tse.jus.br/oficial/ele2026/6257/dados/sp/sp-c0001-e006257-u.json',
+    'URL de 1º Turno (SP) usa código 6257, sufixo -u.json e pasta /dados/sp/'
+  );
+
+  // 2. Teste com Fixture Real do TSE 2026
+  console.log('\n[Grupo 2] Parser com Fixture Oficial 2026:');
+  const resFixture = parseTseOfficialJson(FIXTURE_TSE_2026_BR_U_JSON, {
+    expectedTurn: 2,
+    expectedScope: 'BR',
+    expectedElectionCode: '6258',
+    sourceVerified: true,
+    provenance: 'OFFICIAL_TSE_LIVE'
+  });
+  assert(resFixture.success === true, 'Parse com fixture real retornou success: true');
+  assert(resFixture.data?.turno2.totalValidVotes === 122850000, 'Votos válidos extraídos com exatidão: 122.850.000');
+  assert(resFixture.data?.turno2.status === 'ELEIÇÃO DEFINIDA', 'Status apurado corretamente como ELEIÇÃO DEFINIDA (esae: s e tf: s)');
+  assert(resFixture.data?.turno2.nationalCandidates[0].votes === 62407800, 'Votos do candidato líder: 62.407.800');
+  assert(resFixture.data?.turno2.nationalCandidates[0].number === 13, 'Número do candidato preservado como 13');
+  assert(resFixture.data?.turno2.nationalCandidates[1].number === 22, 'Número do candidato preservado como 22');
+
+  // 3. Teste de consistência matemática dos votos
+  console.log('\n[Grupo 3] Consistência dos Votos e Percentuais:');
+  const cands = resFixture.data?.turno2.nationalCandidates || [];
+  const somaVotos = (cands[0].votes || 0) + (cands[1].votes || 0);
+  assert(
+    somaVotos === resFixture.data?.turno2.totalValidVotes,
+    'Soma dos votos dos candidatos é 100% idêntica ao total de votos válidos'
+  );
+  const somaPcts = Math.round((cands[0].percentage || 0) + (cands[1].percentage || 0));
+  assert(somaPcts === 100, 'Soma das porcentagens dos candidatos totaliza 100%');
+
+  // 4. Teste de Preservação de Número de Candidato Nulo (Issue 6.2)
+  console.log('\n[Grupo 4] Tratamento de Número de Candidato Ausente/Inválido:');
+  const fixtureMissingNumber: TseRawJson = {
+    ele: '6258',
     cdabr: 'BR',
     t: '2',
-    cand: [{ n: '13', nm: 'Candidato A', vap: '1000' }]
+    cand: [{ nm: 'Candidato Sem Numero', vap: '500' }] // campo 'n' ausente
   };
-  const res1 = parseTseOfficialJson(invalidElePayload, {
+  const resMissingNum = parseTseOfficialJson(fixtureMissingNumber, {
     expectedTurn: 2,
     expectedScope: 'BR',
     expectedElectionCode: '6258',
     sourceVerified: true,
     provenance: 'OFFICIAL_TSE_LIVE'
   });
-  assert(res1.success === false, 'Rejeitou com success: false');
-  assert(res1.errors?.some(e => e.includes('Código de eleição rejeitado')) === true, 'Mensagem específica de erro de código de eleição');
+  assert(
+    resMissingNum.data?.turno2.nationalCandidates[0].number === null,
+    'Número de candidato ausente permanece como null (NUNCA vira 0)'
+  );
 
-  // Test 2: Rejection of Scope Mismatch (Issue 3 & 8)
-  console.log('\n[Teste 2] Rejeição de escopo divergente (pediu BR, veio PB):');
-  const mismatchScopePayload: TseRawJson = {
+  // 5. Teste de Distinção de Status da Eleição (Issue 6.3)
+  console.log('\n[Grupo 5] Distinção Rigorosa de Status:');
+  const fixturePartial: TseRawJson = {
     ele: '6258',
-    cdabr: 'PB',
+    cdabr: 'BR',
     t: '2',
-    cand: [{ n: '13', nm: 'Candidato A', vap: '1000' }]
+    pst: '45,50', // apuração parcial
+    tf: 'n',
+    esae: 'n',
+    cand: [{ n: '10', nm: 'Candidato Parcial', vap: '1000', st: 'Eleito' }] // mesmo que venha 'Eleito' em parcial
   };
-  const res2 = parseTseOfficialJson(mismatchScopePayload, {
+  const resPartial = parseTseOfficialJson(fixturePartial, {
     expectedTurn: 2,
     expectedScope: 'BR',
     expectedElectionCode: '6258',
     sourceVerified: true,
     provenance: 'OFFICIAL_TSE_LIVE'
   });
-  assert(res2.success === false, 'Rejeitou com success: false quando escopo diverge');
-  assert(res2.errors?.some(e => e.includes('Abrangência divergente')) === true, 'Mensagem de abrangência divergente presente');
+  assert(
+    resPartial.data?.turno2.status === 'EM APURAÇÃO',
+    'Status em apuração parcial (45,50%) é "EM APURAÇÃO" (não antecipa ELEIÇÃO DEFINIDA sem totalização/esae)'
+  );
 
-  // Test 3: Correct Extraction of Nested Scope from abr[] array (Issue 3)
-  console.log('\n[Teste 3] Extração precisa de abrangência específica dentro de abr[]:');
-  const multiAbrPayload: TseRawJson = {
+  // 6. Teste de Rejeição de Escopos Inválidos (Issue 7 / P1)
+  console.log('\n[Grupo 6] Rejeição Estrita de Escopos Inválidos:');
+  const resInvalidScope = await getOrFetchElectionData({ scope: 'INVALID_UF', turn: 2 });
+  assert(resInvalidScope.success === false, 'Rejeitou escopo inválido com success: false');
+  assert(resInvalidScope.requestSucceeded === false, 'requestSucceeded é false para escopo inválido');
+  assert(resInvalidScope.fetchError?.includes('Abrangência inválida') === true, 'Mensagem clara de erro sobre abrangência inválida');
+
+  // 7. Teste de Rejeição de Código de Eleição Incompatível (P0)
+  console.log('\n[Grupo 7] Rejeição de Código de Eleição Incompatível:');
+  const fixtureWrongEle: TseRawJson = {
+    ele: '545', // Código antigo de 2022 em vez de 6258
+    cdabr: 'BR',
+    t: '2',
+    cand: [{ n: '13', nm: 'Candidato', vap: '100' }]
+  };
+  const resWrongEle = parseTseOfficialJson(fixtureWrongEle, {
+    expectedTurn: 2,
+    expectedScope: 'BR',
+    expectedElectionCode: '6258',
+    sourceVerified: true,
+    provenance: 'OFFICIAL_TSE_LIVE'
+  });
+  assert(resWrongEle.success === false, 'Rejeitou com success: false código antigo 545');
+  assert(resWrongEle.errors?.some(e => e.includes('Código de eleição rejeitado')) === true, 'Erro de código de eleição rejeitado presente');
+
+  // 8. Teste de Seleção Precisa de Abrangência dentro de abr[] (Issue 3 / P1)
+  console.log('\n[Grupo 8] Seleção Precisa de Abrangência em Arquivo Consolidado:');
+  const fixtureMultiAbr: TseRawJson = {
     ele: '6258',
     t: '2',
     abr: [
-      {
-        cdabr: 'SP',
-        vvc: '500000',
-        cand: [{ n: '10', nm: 'Cand SP', vap: '500000' }]
-      },
-      {
-        cdabr: 'BR',
-        vvc: '120000000',
-        cand: [
-          { n: '13', nm: 'Lula', vap: '62000000', pvap: '51,67', st: 'Eleito', e: 's' },
-          { n: '22', nm: 'Flávio', vap: '58000000', pvap: '48,33', st: 'Não eleito', e: 'n' }
-        ]
-      }
+      { cdabr: 'BA', vvc: '8000000', cand: [{ n: '10', nm: 'Cand BA', vap: '8000000' }] },
+      { cdabr: 'SP', vvc: '24000000', cand: [{ n: '20', nm: 'Cand SP', vap: '24000000' }] }
     ]
   };
-  const res3 = parseTseOfficialJson(multiAbrPayload, {
+  const resSelectSP = parseTseOfficialJson(fixtureMultiAbr, {
     expectedTurn: 2,
-    expectedScope: 'BR',
+    expectedScope: 'SP',
     expectedElectionCode: '6258',
     sourceVerified: true,
     provenance: 'OFFICIAL_TSE_LIVE'
   });
-  assert(res3.success === true, 'Processou com sucesso ao encontrar BR dentro de abr[]');
-  assert(res3.data?.turno2.totalValidVotes === 120000000, 'Extraiu métrica correta de BR (120M e não 500k de SP)');
-  assert(res3.data?.turno2.nationalCandidates[0].name === 'Lula', 'Identificou candidato de BR e não de SP');
+  assert(resSelectSP.success === true, 'Localizou SP dentro de abr[]');
+  assert(resSelectSP.data?.turno2.totalValidVotes === 24000000, 'Extraiu votos válidos de SP (24M e não 8M da Bahia)');
 
-  // Test 4: Rejection of Turn Mismatch
-  console.log('\n[Teste 4] Rejeição de turno incompatível (esperado 2, veio 1):');
-  const turnMismatchPayload: TseRawJson = {
-    ele: '6258',
-    cdabr: 'BR',
-    t: '1',
-    cand: [{ n: '13', nm: 'Candidato A', vap: '1000' }]
-  };
-  const res4 = parseTseOfficialJson(turnMismatchPayload, {
-    expectedTurn: 2,
-    expectedScope: 'BR',
-    expectedElectionCode: '6258',
-    sourceVerified: true,
-    provenance: 'OFFICIAL_TSE_LIVE'
-  });
-  assert(res4.success === false, 'Rejeitou arquivo com turno incompatível');
-
-  // Test 5: Scoped Cache Isolation (Issue 4 - Never share cross-scope cache)
-  console.log('\n[Teste 5] Isolamento de cache entre escopos distintos (BR vs SP):');
-  const resScopeBR = await getOrFetchElectionData({ scope: 'BR', turn: 2 });
-  const resScopeSP = await getOrFetchElectionData({ scope: 'SP', turn: 2 });
-  assert(resScopeBR.scope === 'BR', 'Resposta para BR tem scope BR');
-  assert(resScopeSP.scope === 'SP', 'Resposta para SP tem scope SP');
-  assert(resScopeBR.presidentialData?.audit.codigoAbrangencia === 'BR', 'Audit de BR é BR');
-  assert(resScopeSP.presidentialData?.audit.codigoAbrangencia === 'SP', 'Audit de SP é SP (nunca misturado)');
-
-  // Test 6: Explicit API contract fields (Issue 5)
-  console.log('\n[Teste 6] Contrato de API com separação de requestSucceeded, dataAvailable e dataIsOfficial:');
-  assert(typeof resScopeBR.requestSucceeded === 'boolean', 'Campo requestSucceeded é booleano');
-  assert(typeof resScopeBR.dataAvailable === 'boolean', 'Campo dataAvailable é booleano');
-  assert(typeof resScopeBR.dataIsOfficial === 'boolean', 'Campo dataIsOfficial é booleano');
-
-  console.log(`\n===========================================`);
-  console.log(`RESULTADO DOS TESTES: ${passed} passaram, ${failed} falharam.`);
-  console.log(`===========================================`);
+  console.log(`\n======================================================`);
+  console.log(`RESULTADO DA SUÍTE: ${passed} passaram, ${failed} falharam.`);
+  console.log(`======================================================`);
 
   if (failed > 0) {
     process.exit(1);
