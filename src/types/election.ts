@@ -3,6 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type DataProvenance =
+  | 'OFFICIAL_TSE_LIVE'
+  | 'OFFICIAL_TSE_CACHE'
+  | 'MANUAL_IMPORT_UNVERIFIED'
+  | 'DEMONSTRATIVE_BASELINE';
+
+export interface ProvenanceAudit {
+  provenance: DataProvenance;
+  schemaValid: boolean;
+  sourceVerified: boolean; // True ONLY if fetched from official server-configured TSE endpoint
+  officiallyPublished: boolean; // True if dg/hg/tse headers are present and validated
+  sourceUrl?: string;
+  dataHoraGeracaoTse?: string; // from dg + hg
+  codigoEleicao?: string; // from ele
+  codigoAbrangencia?: string; // BR, ZZ, SP, etc.
+  contentHash?: string; // sha256 of raw received content
+  importedAt: string;
+  validationWarnings?: string[];
+}
+
 export interface CandidateResult {
   id: string;
   name: string;
@@ -10,9 +30,9 @@ export interface CandidateResult {
   party: string;
   number: number;
   color: string;
-  votes: number;
-  percentage: number;
-  status?: 'Eleito' | '2º Turno' | 'Não eleito' | 'Empate';
+  votes: number | null;
+  percentage: number | null;
+  status?: string; // Official TSE status (e.g., 'Eleito', '2º Turno', 'Não eleito')
 }
 
 export interface LocationResult {
@@ -22,50 +42,61 @@ export interface LocationResult {
   type: 'ESTADO' | 'EXTERIOR' | 'BRASIL';
   region: 'Norte' | 'Nordeste' | 'Centro-Oeste' | 'Sudeste' | 'Sul' | 'Exterior';
   flagOrIcon: string;
-  totalizedSectionsPct: number;
-  totalValidVotes: number;
-  nullVotes: number;
-  blankVotes: number;
-  abstentions: number;
-  votersEligible: number;
+  totalizedSectionsPct: number | null;
+  totalSections: number | null;
+  totalizedSections: number | null;
+  totalValidVotes: number | null;
+  nullVotes: number | null;
+  blankVotes: number | null;
+  abstentions: number | null;
+  votersEligible: number | null;
   candidates: CandidateResult[];
+  statusDescription: string;
+  isImported: boolean;
 }
 
 export interface RoundData {
   turnNumber: 1 | 2;
-  status: 'ELEIÇÃO DEFINIDA' | 'EM APURAÇÃO' | 'AGUARDANDO';
-  totalizedSectionsPct: number;
-  totalSections: number;
-  totalizedSections: number;
-  totalValidVotes: number;
-  nullVotes: number;
-  blankVotes: number;
-  abstentions: number;
-  votersEligible: number;
+  status: 'ELEIÇÃO DEFINIDA' | 'TOTALIZADO' | 'EM APURAÇÃO' | 'AGUARDANDO';
+  totalizedSectionsPct: number | null;
+  totalSections: number | null;
+  totalizedSections: number | null;
+  totalValidVotes: number | null;
+  nullVotes: number | null;
+  blankVotes: number | null;
+  abstentions: number | null;
+  votersEligible: number | null;
   nationalCandidates: CandidateResult[];
   locations: LocationResult[];
+  integrityCheck?: {
+    validVotesSumUfs: number;
+    matchesNational: boolean;
+    difference: number;
+  };
 }
 
 export interface PresidentialElectionData {
   source: string;
   lastFetchedAt: string;
   dataUpdatedAt: string;
-  isOfficialValidated?: boolean;
-  isDemonstrative?: boolean;
-  dataHoraGeracaoTse?: string;
+  audit: ProvenanceAudit;
   turno1: RoundData;
   turno2: RoundData;
   keyHighlights: string[];
 }
 
-export type FetchStatus = 'LIVE_UPDATED' | 'LIVE_UNCHANGED' | 'CACHE_FALLBACK';
+export type FetchStatus = 'LIVE_UPDATED' | 'LIVE_UNCHANGED' | 'CACHE_FALLBACK' | 'FETCH_ERROR';
 
 export interface ApiResponse {
   success: boolean;
   status: FetchStatus;
+  provenance: DataProvenance;
+  scope: string; // 'BR', 'ZZ', 'SP', etc.
   isLive: boolean;
+  isStale: boolean;
   fetchError: string | null;
-  lastFetchedAt: string;
-  dataUpdatedAt: string | null;
-  presidentialData?: PresidentialElectionData;
+  lastSuccessfulFetchAt: string | null;
+  lastAttemptedFetchAt: string;
+  dataHoraGeracaoTse: string | null;
+  presidentialData: PresidentialElectionData | null;
 }

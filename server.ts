@@ -31,27 +31,47 @@ app.use((req, res, next) => {
 
 const handleApiRequest = async (req: express.Request, res: express.Response) => {
   try {
-    const url = (req.body?.url || req.query?.url) as string | undefined;
-    const rawHtml = req.body?.rawHtml as string | undefined;
+    if (req.query?.url || req.body?.url) {
+      return res.status(400).json({
+        success: false,
+        status: 'FETCH_ERROR',
+        provenance: 'DEMONSTRATIVE_BASELINE',
+        scope: 'BR',
+        isLive: false,
+        isStale: false,
+        fetchError: 'Segurança (SSRF): Parâmetro "url" arbitrário é estritamente proibido. Use "scope" (ex: BR, SP, RJ, ZZ).',
+        lastSuccessfulFetchAt: null,
+        lastAttemptedFetchAt: new Date().toISOString(),
+        dataHoraGeracaoTse: null,
+        presidentialData: null
+      });
+    }
 
-    const result = await getOrFetchElectionData(url, rawHtml);
+    const rawScope = ((req.query?.scope || req.body?.scope || 'BR') as string).toUpperCase();
+    const rawTurn = Number(req.query?.turn || req.body?.turn || 2);
+    const turn = rawTurn === 1 ? 1 : 2;
+
+    const result = await getOrFetchElectionData({ scope: rawScope, turn });
     return res.json(result);
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      status: 'CACHE_FALLBACK',
+      status: 'FETCH_ERROR',
+      provenance: 'DEMONSTRATIVE_BASELINE',
+      scope: 'BR',
       isLive: false,
-      fetchError: error.message,
-      lastFetchedAt: new Date().toISOString(),
-      dataUpdatedAt: null,
-      data: null
+      isStale: false,
+      fetchError: error.message || 'Erro interno no servidor de consulta ao TSE.',
+      lastSuccessfulFetchAt: null,
+      lastAttemptedFetchAt: new Date().toISOString(),
+      dataHoraGeracaoTse: null,
+      presidentialData: null
     });
   }
 };
 
 app.get('/api/data', handleApiRequest);
-app.get('/api/scrape-g1', handleApiRequest);
-app.post('/api/scrape-g1', handleApiRequest);
+app.get('/api/tse-data', handleApiRequest);
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

@@ -1,9 +1,13 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getOrFetchElectionData } from '../src/services/electionService.js';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-const ALLOWED_TSE_HOSTS = ['resultados.tse.jus.br', 'dadosabertos.tse.jus.br', 'divulga.tse.jus.br'];
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getOrFetchElectionData, ALLOWED_SCOPES } from '../src/services/electionService.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CORS & Cache-Control (Strict no-store for accurate live verification)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -16,52 +20,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    let targetUrl: string | undefined = undefined;
-    const requestedUrl = (req.body?.url || req.query?.url) as string | undefined;
-
-    if (requestedUrl) {
-      try {
-        const parsedUrl = new URL(requestedUrl);
-        if (ALLOWED_TSE_HOSTS.includes(parsedUrl.hostname.toLowerCase())) {
-          targetUrl = requestedUrl;
-        } else {
-          return res.status(400).json({
-            success: false,
-            status: 'CACHE_FALLBACK',
-            isLive: false,
-            fetchError: 'Segurança (SSRF): Apenas URLs oficiais do domínio tse.jus.br são permitidas.',
-            lastFetchedAt: new Date().toISOString(),
-            dataUpdatedAt: null,
-            presidentialData: null
-          });
-        }
-      } catch {
-        return res.status(400).json({
-          success: false,
-          status: 'CACHE_FALLBACK',
-          isLive: false,
-          fetchError: 'URL fornecida é inválida.',
-          lastFetchedAt: new Date().toISOString(),
-          dataUpdatedAt: null,
-          presidentialData: null
-        });
-      }
+    // SSRF Immunity: Reject any attempt to supply external or custom URLs.
+    if (req.query?.url || req.body?.url) {
+      return res.status(400).json({
+        success: false,
+        status: 'FETCH_ERROR',
+        provenance: 'DEMONSTRATIVE_BASELINE',
+        scope: 'BR',
+        isLive: false,
+        isStale: false,
+        fetchError: 'Segurança (SSRF): Parâmetro "url" arbitrário é estritamente proibido. Use "scope" (ex: BR, SP, RJ, ZZ).',
+        lastSuccessfulFetchAt: null,
+        lastAttemptedFetchAt: new Date().toISOString(),
+        dataHoraGeracaoTse: null,
+        presidentialData: null
+      });
     }
 
-    const providedContent = req.body?.rawHtml || req.body?.rawJson as string | undefined;
-    const result = await getOrFetchElectionData(targetUrl, providedContent);
+    // Validate scope (defaults to 'BR')
+    const rawScope = ((req.query?.scope || req.body?.scope || 'BR') as string).toUpperCase();
+    const scope = (ALLOWED_SCOPES as readonly string[]).includes(rawScope) ? rawScope : 'BR';
 
-    // If there was a fetch error and we are returning fallback data, communicate HTTP status transparently
-    const httpStatus = result.isLive ? 200 : 200; // Return payload with fetchError intact so UI displays fallback banner
-    return res.status(httpStatus).json(result);
+    // Validate turn (defaults to 2)
+    const rawTurn = Number(req.query?.turn || req.body?.turn || 2);
+    const turn = rawTurn === 1 ? 1 : 2;
+
+    const result = await getOrFetchElectionData({ scope, turn });
+
+    return res.status(200).json(result);
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      status: 'CACHE_FALLBACK',
+      status: 'FETCH_ERROR',
+      provenance: 'DEMONSTRATIVE_BASELINE',
+      scope: 'BR',
       isLive: false,
-      fetchError: error.message || 'Erro interno no servidor de consulta ao TSE',
-      lastFetchedAt: new Date().toISOString(),
-      dataUpdatedAt: null,
+      isStale: false,
+      fetchError: error.message || 'Erro interno no servidor de consulta ao TSE.',
+      lastSuccessfulFetchAt: null,
+      lastAttemptedFetchAt: new Date().toISOString(),
+      dataHoraGeracaoTse: null,
       presidentialData: null
     });
   }

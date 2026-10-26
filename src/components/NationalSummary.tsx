@@ -4,46 +4,56 @@
  */
 
 import React from 'react';
-import { RoundData } from '../types/election';
-import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { RoundData, ProvenanceAudit } from '../types/election';
+import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck, Database, Upload } from 'lucide-react';
 
 interface NationalSummaryProps {
   roundData: RoundData;
   locationName: string;
-  isOfficialValidated?: boolean;
-  dataHoraGeracaoTse?: string;
-  isDemonstrative?: boolean;
+  audit?: ProvenanceAudit;
 }
 
 export const NationalSummary: React.FC<NationalSummaryProps> = ({
   roundData,
   locationName,
-  isOfficialValidated,
-  dataHoraGeracaoTse,
-  isDemonstrative
+  audit
 }) => {
   const { nationalCandidates, totalValidVotes, nullVotes, blankVotes, abstentions, votersEligible } = roundData;
 
-  const validPct = votersEligible > 0 ? (totalValidVotes / votersEligible) * 100 : 0;
-  const nullPct = votersEligible > 0 ? (nullVotes / votersEligible) * 100 : 0;
-  const blankPct = votersEligible > 0 ? (blankVotes / votersEligible) * 100 : 0;
-  const abstentionPct = votersEligible > 0 ? (abstentions / votersEligible) * 100 : 0;
+  const hasData = totalValidVotes !== null && totalValidVotes > 0;
+  const validPct = votersEligible && votersEligible > 0 && totalValidVotes !== null ? (totalValidVotes / votersEligible) * 100 : null;
+  const nullPct = votersEligible && votersEligible > 0 && nullVotes !== null ? (nullVotes / votersEligible) * 100 : null;
+  const blankPct = votersEligible && votersEligible > 0 && blankVotes !== null ? (blankVotes / votersEligible) * 100 : null;
+  const abstentionPct = votersEligible && votersEligible > 0 && abstentions !== null ? (abstentions / votersEligible) * 100 : null;
 
   return (
     <div className="space-y-6">
       {/* Title & Status Badge */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {isOfficialValidated ? (
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            {audit?.provenance === 'OFFICIAL_TSE_LIVE' && (
               <span className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                Dados Oficiais Validados pelo TSE {dataHoraGeracaoTse ? `(${dataHoraGeracaoTse})` : ''}
+                Dados Oficiais Validados pelo TSE {audit.dataHoraGeracaoTse ? `(${audit.dataHoraGeracaoTse})` : ''}
               </span>
-            ) : (
+            )}
+            {audit?.provenance === 'OFFICIAL_TSE_CACHE' && (
+              <span className="bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                Histórico Oficial TSE (Cache Salvo)
+              </span>
+            )}
+            {audit?.provenance === 'MANUAL_IMPORT_UNVERIFIED' && (
+              <span className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <Upload className="w-3.5 h-3.5 text-purple-500" />
+                Importação Manual (Não Verificada pelo TSE)
+              </span>
+            )}
+            {(!audit || audit.provenance === 'DEMONSTRATIVE_BASELINE') && (
               <span className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                {isDemonstrative ? 'Dados Demonstrativos / Não Verificados' : 'Aguardando Totalização Oficial do TSE'}
+                Aguardando Apuração Oficial
               </span>
             )}
 
@@ -51,7 +61,8 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
               {roundData.status}
             </span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1">
+
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             {locationName} — {roundData.turnNumber}º Turno
           </h2>
         </div>
@@ -115,11 +126,17 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             {/* Percentage & Vote Count */}
             <div className="mt-4 flex items-baseline justify-between border-t border-slate-100 dark:border-slate-800 pt-3">
               <div>
-                <span className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  {candidate.percentage.toFixed(1).replace('.', ',')}%
-                </span>
+                {candidate.percentage !== null ? (
+                  <span className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    {candidate.percentage.toFixed(1).replace('.', ',')}%
+                  </span>
+                ) : (
+                  <span className="text-3xl font-extrabold tracking-tight text-slate-400">
+                    —
+                  </span>
+                )}
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {candidate.votes.toLocaleString('pt-BR')} votos
+                  {candidate.votes !== null ? `${candidate.votes.toLocaleString('pt-BR')} votos` : 'Aguardando apuração'}
                 </p>
               </div>
 
@@ -128,7 +145,7 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
                   <div
                     className="h-full rounded-full transition-all duration-700"
                     style={{
-                      width: `${Math.min(100, candidate.percentage)}%`,
+                      width: `${candidate.percentage !== null ? Math.min(100, Math.max(0, candidate.percentage)) : 0}%`,
                       backgroundColor: candidate.color
                     }}
                   ></div>
@@ -147,10 +164,10 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             <span className="text-xs font-semibold">Votos Válidos</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {totalValidVotes.toLocaleString('pt-BR')}
+            {totalValidVotes !== null ? totalValidVotes.toLocaleString('pt-BR') : '—'}
           </p>
-          <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-            {validPct.toFixed(1).replace('.', ',')}% do total
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+            {validPct !== null ? `${validPct.toFixed(1).replace('.', ',')}% do eleitorado` : 'Aguardando apuração'}
           </span>
         </div>
 
@@ -160,10 +177,10 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             <span className="text-xs font-semibold">Brancos & Nulos</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {(blankVotes + nullVotes).toLocaleString('pt-BR')}
+            {blankVotes !== null && nullVotes !== null ? (blankVotes + nullVotes).toLocaleString('pt-BR') : '—'}
           </p>
-          <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">
-            {(blankPct + nullPct).toFixed(1).replace('.', ',')}% do total
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+            {blankPct !== null && nullPct !== null ? `${(blankPct + nullPct).toFixed(1).replace('.', ',')}% do total` : 'Aguardando apuração'}
           </span>
         </div>
 
@@ -173,10 +190,10 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             <span className="text-xs font-semibold">Abstenção</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {abstentions.toLocaleString('pt-BR')}
+            {abstentions !== null ? abstentions.toLocaleString('pt-BR') : '—'}
           </p>
-          <span className="text-[11px] text-blue-600 dark:text-blue-400 font-bold">
-            {abstentionPct.toFixed(1).replace('.', ',')}% de abstenção
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+            {abstentionPct !== null ? `${abstentionPct.toFixed(1).replace('.', ',')}% de abstenção` : 'Aguardando apuração'}
           </span>
         </div>
 
@@ -186,10 +203,10 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             <span className="text-xs font-semibold">Aptos a Votar</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {votersEligible.toLocaleString('pt-BR')}
+            {votersEligible !== null ? votersEligible.toLocaleString('pt-BR') : '—'}
           </p>
-          <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold">
-            100% Eleitorado
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+            {votersEligible !== null ? '100% Eleitorado' : 'Aguardando'}
           </span>
         </div>
       </div>

@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { PresidentialElectionData } from '../types/election';
 import { parseTseOfficialJson, TseRawJson } from '../utils/tseParser';
-import { X, Check, Upload, AlertCircle, FileCode } from 'lucide-react';
+import { X, Check, Upload, AlertCircle, FileCode, ShieldAlert } from 'lucide-react';
 
 interface ImportDataModalProps {
   isOpen: boolean;
@@ -22,38 +22,44 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   onSaveData
 }) => {
   const [pasteText, setPasteText] = useState('');
-  const [lula2026Votes, setLula2026Votes] = useState(currentData.turno2.nationalCandidates[0]?.votes || 62407800);
-  const [flavio2026Votes, setFlavio2026Votes] = useState(currentData.turno2.nationalCandidates[1]?.votes || 60442200);
+  const [cand1Votes, setCand1Votes] = useState(currentData.turno2.nationalCandidates[0]?.votes || 0);
+  const [cand2Votes, setCand2Votes] = useState(currentData.turno2.nationalCandidates[1]?.votes || 0);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   if (!isOpen) return null;
 
   const handleApplyManualEdit = () => {
-    const totalValid = lula2026Votes + flavio2026Votes;
-    const lulaPct = totalValid > 0 ? (lula2026Votes / totalValid) * 100 : 50;
-    const flavioPct = totalValid > 0 ? (flavio2026Votes / totalValid) * 100 : 50;
+    const totalValid = cand1Votes + cand2Votes;
+    const p1 = totalValid > 0 ? (cand1Votes / totalValid) * 100 : 50;
+    const p2 = totalValid > 0 ? (cand2Votes / totalValid) * 100 : 50;
 
     const updated: PresidentialElectionData = JSON.parse(JSON.stringify(currentData));
     updated.dataUpdatedAt = new Date().toISOString();
-    updated.isOfficialValidated = false;
-    updated.isDemonstrative = true;
-    updated.source = 'Dados Inseridos Manualmente (Não Verificados pelo TSE)';
+    updated.audit = {
+      provenance: 'MANUAL_IMPORT_UNVERIFIED',
+      schemaValid: false,
+      sourceVerified: false,
+      officiallyPublished: false,
+      importedAt: new Date().toISOString(),
+      validationWarnings: ['Dados editados manualmente pelo usuário no painel. Não verificados pelo TSE.']
+    };
+    updated.source = 'Ajuste Manual do Usuário (Não Verificado pelo TSE)';
     updated.turno2.totalValidVotes = totalValid;
 
     // Update 2nd round national candidates
     if (updated.turno2.nationalCandidates[0]) {
-      updated.turno2.nationalCandidates[0].votes = lula2026Votes;
-      updated.turno2.nationalCandidates[0].percentage = lulaPct;
-      updated.turno2.nationalCandidates[0].status = lula2026Votes > flavio2026Votes ? 'Eleito' : 'Não eleito';
+      updated.turno2.nationalCandidates[0].votes = cand1Votes;
+      updated.turno2.nationalCandidates[0].percentage = p1;
+      updated.turno2.nationalCandidates[0].status = cand1Votes > cand2Votes ? 'Liderando' : 'Segundo';
     }
     if (updated.turno2.nationalCandidates[1]) {
-      updated.turno2.nationalCandidates[1].votes = flavio2026Votes;
-      updated.turno2.nationalCandidates[1].percentage = flavioPct;
-      updated.turno2.nationalCandidates[1].status = flavio2026Votes > lula2026Votes ? 'Eleito' : 'Não eleito';
+      updated.turno2.nationalCandidates[1].votes = cand2Votes;
+      updated.turno2.nationalCandidates[1].percentage = p2;
+      updated.turno2.nationalCandidates[1].status = cand2Votes > cand1Votes ? 'Liderando' : 'Segundo';
     }
 
     onSaveData(updated);
-    setStatusMsg({ type: 'info', text: 'Dados manuais aplicados como "Demonstrativos / Não Verificados".' });
+    setStatusMsg({ type: 'info', text: 'Dados manuais aplicados como "MANUAL_IMPORT_UNVERIFIED".' });
     setTimeout(() => {
       onClose();
     }, 800);
@@ -68,22 +74,32 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     try {
       if (pasteText.trim().startsWith('{')) {
         const rawJson: TseRawJson = JSON.parse(pasteText);
-        const parsedTse = parseTseOfficialJson(rawJson, currentData);
+        const parseResult = parseTseOfficialJson(rawJson, {
+          sourceVerified: false, // User pasted content is NOT sourceVerified by server
+          provenance: 'MANUAL_IMPORT_UNVERIFIED',
+          existingData: currentData
+        });
 
-        if (parsedTse) {
-          onSaveData(parsedTse);
-          setStatusMsg({ type: 'success', text: 'JSON do TSE validado e importado oficialmente com sucesso!' });
-          setTimeout(() => onClose(), 800);
+        if (parseResult.success && parseResult.data) {
+          onSaveData(parseResult.data);
+          setStatusMsg({
+            type: 'success',
+            text: `JSON validado no esquema do TSE (${parseResult.scope || 'BR'} - ${parseResult.turn}ºT)! Marcado como MANUAL_IMPORT_UNVERIFIED.`
+          });
+          setTimeout(() => onClose(), 1200);
           return;
         } else {
-          setStatusMsg({ type: 'error', text: 'O JSON fornecido não contém o esquema de candidatos/votos oficial do TSE (propriedade "cand").' });
+          setStatusMsg({
+            type: 'error',
+            text: parseResult.errors?.join('; ') || 'Esquema incompatível com a estrutura oficial do TSE.'
+          });
           return;
         }
       } else {
-        setStatusMsg({ type: 'error', text: 'O conteúdo colado precisa ser um JSON válido retornado pelo TSE.' });
+        setStatusMsg({ type: 'error', text: 'O conteúdo precisa ser um objeto JSON formatado.' });
       }
     } catch (err: any) {
-      setStatusMsg({ type: 'error', text: `Erro de validação no JSON: ${err.message}` });
+      setStatusMsg({ type: 'error', text: `Erro de sintaxe no JSON: ${err.message}` });
     }
   };
 
@@ -98,10 +114,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">
-                Importar ou Ajustar Boletim Oficial do TSE
+                Importador de Dados Eleitorais do TSE
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Apenas JSONs no esquema oficial do TSE são validados como autênticos
+                Diferenciação estrita de procedência (Validação de Esquema vs. Fonte Oficial)
               </p>
             </div>
           </div>
@@ -114,17 +130,25 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           </button>
         </div>
 
+        {/* Notice on Provenance */}
+        <div className="p-3 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2 border border-slate-200 dark:border-slate-700">
+          <ShieldAlert className="w-4 h-4 text-purple-500 shrink-0 mt-0.5" />
+          <span>
+            <strong>Auditoria de Procedência:</strong> Arquivos importados manualmente são validados no esquema oficial do TSE, mas classificados com procedência <code>MANUAL_IMPORT_UNVERIFIED</code>, pois a origem não é autenticada diretamente pelo servidor.
+          </span>
+        </div>
+
         {/* Option 1: Import Official TSE JSON */}
         <div className="space-y-2">
           <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
             <FileCode className="w-4 h-4 text-emerald-500" />
-            1. Importar JSON Oficial do TSE (Validação Rígida):
+            1. Colar JSON do TSE (Validação de Esquema e Turno):
           </label>
           <textarea
             rows={4}
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            placeholder='Cole o JSON oficial do TSE (contendo propriedades "cand", "pst", "vvc")...'
+            placeholder='Cole o arquivo JSON baixado do TSE (ex: dados-simplificados/br/...)...'
             className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
           />
           <button
@@ -132,37 +156,37 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-extrabold text-xs hover:bg-emerald-500 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
           >
             <Upload className="w-4 h-4" />
-            Validar e Importar JSON Oficial do TSE
+            Validar Esquema e Carregar JSON
           </button>
         </div>
 
-        {/* Option 2: Manual Edit (Marked as Demonstrative) */}
+        {/* Option 2: Manual Edit */}
         <div className="space-y-3 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60">
           <span className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
-            2. Ajuste Manual Demonstrativo (Marca como Não Verificado)
+            2. Ajuste Rápido de Simulação
           </span>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                Votos Lula:
+                Votos {currentData.turno2.nationalCandidates[0]?.shortName || 'Candidato 1'}:
               </label>
               <input
                 type="number"
-                value={lula2026Votes}
-                onChange={(e) => setLula2026Votes(Number(e.target.value))}
+                value={cand1Votes}
+                onChange={(e) => setCand1Votes(Number(e.target.value))}
                 className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                Votos Flávio Bolsonaro:
+                Votos {currentData.turno2.nationalCandidates[1]?.shortName || 'Candidato 2'}:
               </label>
               <input
                 type="number"
-                value={flavio2026Votes}
-                onChange={(e) => setFlavio2026Votes(Number(e.target.value))}
+                value={cand2Votes}
+                onChange={(e) => setCand2Votes(Number(e.target.value))}
                 className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
@@ -197,7 +221,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             className="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs hover:bg-amber-400 transition-all shadow-md flex items-center gap-1.5"
           >
             <Check className="w-4 h-4" />
-            Aplicar Ajuste Demonstrativo
+            Aplicar Dados Manuais
           </button>
         </div>
       </div>

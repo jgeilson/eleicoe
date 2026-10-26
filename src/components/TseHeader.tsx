@@ -4,14 +4,19 @@
  */
 
 import React from 'react';
-import { RefreshCw, Sun, Moon, CheckCircle2, Upload } from 'lucide-react';
+import { RefreshCw, Sun, Moon, ShieldCheck, AlertTriangle, Database, Upload, Globe, MapPin } from 'lucide-react';
+import { DataProvenance } from '../types/election';
 
 interface TseHeaderProps {
   currentTurn: 1 | 2;
   onTurnChange: (turn: 1 | 2) => void;
-  totalizedSectionsPct: number;
-  dataUpdatedAt: string | null;
-  lastFetchedAt: string | null;
+  selectedScope: string;
+  onScopeChange: (scope: string) => void;
+  totalizedSectionsPct: number | null;
+  provenance: DataProvenance;
+  isStale: boolean;
+  dataHoraGeracaoTse: string | null;
+  lastSuccessfulFetchAt: string | null;
   isLoading: boolean;
   onRefresh: () => void;
   onOpenImportModal: () => void;
@@ -22,71 +27,94 @@ interface TseHeaderProps {
 export const TseHeader: React.FC<TseHeaderProps> = ({
   currentTurn,
   onTurnChange,
+  selectedScope,
+  onScopeChange,
   totalizedSectionsPct,
-  dataUpdatedAt,
-  lastFetchedAt,
+  provenance,
+  isStale,
+  dataHoraGeracaoTse,
+  lastSuccessfulFetchAt,
   isLoading,
   onRefresh,
   onOpenImportModal,
   darkMode,
   onToggleDarkMode
 }) => {
-  const formattedDataUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    : '20:30';
-
-  const formattedLastFetched = lastFetchedAt
-    ? new Date(lastFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const formattedSyncTime = lastSuccessfulFetchAt
+    ? new Date(lastSuccessfulFetchAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : null;
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900 text-white border-b border-slate-800 shadow-md">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Top Branding & Controls Bar */}
-        <div className="h-16 flex items-center justify-between border-b border-slate-800/80">
+        {/* Top Branding & Provenance Bar */}
+        <div className="h-16 flex items-center justify-between border-b border-slate-800/80 gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-md">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-md shrink-0">
               ⚖️
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-extrabold text-white text-base md:text-lg tracking-tight leading-tight">
                   TSE • Divulgação de Resultados
                 </h1>
-                <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Presidente
-                </span>
+
+                {/* Provenance Badge */}
+                {provenance === 'OFFICIAL_TSE_LIVE' && (
+                  <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                    TSE Ao Vivo Autenticado
+                  </span>
+                )}
+                {provenance === 'OFFICIAL_TSE_CACHE' && (
+                  <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
+                    <Database className="w-3 h-3 text-blue-400" />
+                    Histórico Oficial TSE (Cache)
+                  </span>
+                )}
+                {provenance === 'MANUAL_IMPORT_UNVERIFIED' && (
+                  <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
+                    <Upload className="w-3 h-3 text-purple-400" />
+                    Importado Manualmente
+                  </span>
+                )}
+                {provenance === 'DEMONSTRATIVE_BASELINE' && (
+                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
+                    <AlertTriangle className="w-3 h-3 text-amber-400" />
+                    Base Demonstrativa
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-amber-400 font-semibold">
-                Eleição Presidencial 2026 • Apuração do TSE (Brasil & Exterior)
+              <p className="text-xs text-slate-400">
+                Eleição Presidencial 2026 • Apuração Oficial do TSE
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={onOpenImportModal}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-xs hover:bg-amber-400 transition-all shadow-sm"
-              title="Carregar ou colar boletim oficial de 2026"
+              title="Importar arquivo oficial do TSE"
             >
               <Upload className="w-3.5 h-3.5" />
-              Carregar Dados 2026
+              Importar TSE
             </button>
 
             <div className="hidden lg:flex flex-col text-right px-2 border-r border-slate-800">
               <span className="text-[11px] font-semibold text-slate-200">
-                Totalização: {formattedDataUpdated}
+                {dataHoraGeracaoTse ? `Geração TSE: ${dataHoraGeracaoTse}` : 'Aguardando Geração'}
               </span>
               <span className="text-[10px] text-slate-400 flex items-center gap-1 justify-end">
-                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
-                {formattedLastFetched ? `Sincronizado às ${formattedLastFetched}` : 'Dados Oficiais'}
+                {formattedSyncTime ? `Consulta: ${formattedSyncTime}` : 'Sem sincronização ao vivo'}
+                {isStale && <span className="text-amber-400 font-bold">(dados salvos)</span>}
               </span>
             </div>
 
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              title="Consultar totalização no TSE"
+              title="Consultar servidor oficial do TSE"
               className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -102,46 +130,82 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
           </div>
         </div>
 
-        {/* Turn Switcher & Progress Bar */}
-        <div className="py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          {/* Turn Tabs */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => onTurnChange(2)}
-              className={`px-3.5 py-1.5 rounded-lg font-bold transition-all ${
-                currentTurn === 2
-                  ? 'bg-amber-500 text-slate-950 shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              2º Turno (Presidente)
-            </button>
-            <button
-              onClick={() => onTurnChange(1)}
-              className={`px-3.5 py-1.5 rounded-lg font-bold transition-all ${
-                currentTurn === 1
-                  ? 'bg-amber-500 text-slate-950 shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              1º Turno (Presidente)
-            </button>
+        {/* Turn & Scope Filter Controls Bar */}
+        <div className="py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+          {/* Turn Tabs and Scope Selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => onTurnChange(2)}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  currentTurn === 2
+                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                2º Turno
+              </button>
+              <button
+                onClick={() => onTurnChange(1)}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  currentTurn === 1
+                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                1º Turno
+              </button>
+            </div>
+
+            {/* Scope Selector */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => onScopeChange('BR')}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all ${
+                  selectedScope === 'BR'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3 h-3" />
+                Brasil (BR)
+              </button>
+              <button
+                onClick={() => onScopeChange('ZZ')}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all ${
+                  selectedScope === 'ZZ'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Globe className="w-3 h-3" />
+                Exterior (ZZ)
+              </button>
+            </div>
           </div>
 
           {/* Section Progress Bar */}
-          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-3 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
+          <div className="w-full md:w-auto flex items-center justify-between md:justify-start gap-3 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
             <span className="text-slate-300 font-medium text-nowrap">
-              Seções Apuradas:
+              Seções Apuradas ({selectedScope}):
             </span>
-            <div className="w-28 sm:w-36 bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-700/50">
-              <div
-                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${totalizedSectionsPct}%` }}
-              ></div>
-            </div>
-            <span className="font-extrabold text-emerald-400 text-nowrap">
-              {totalizedSectionsPct.toFixed(2).replace('.', ',')}%
-            </span>
+            {totalizedSectionsPct !== null ? (
+              <>
+                <div className="w-28 sm:w-36 bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-700/50">
+                  <div
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, Math.max(0, totalizedSectionsPct))}%` }}
+                  ></div>
+                </div>
+                <span className="font-extrabold text-emerald-400 text-nowrap">
+                  {totalizedSectionsPct.toFixed(2).replace('.', ',')}%
+                </span>
+              </>
+            ) : (
+              <span className="font-semibold text-amber-400 text-nowrap text-[11px]">
+                Aguardando Apuração
+              </span>
+            )}
           </div>
         </div>
       </div>
