@@ -184,7 +184,7 @@ export function parseTseOfficialJson(
   let rootMatchesScope = false;
 
   const rootCdabr = (rawJson.cdabr || rawJson.tpabr || '').toUpperCase();
-  if (rootCdabr === targetScope) {
+  if (rootCdabr === targetScope || rootCdabr === 'BR') {
     rootMatchesScope = true;
   }
 
@@ -209,13 +209,40 @@ export function parseTseOfficialJson(
     return { success: false, errors };
   }
 
-  // 4. Extract Candidate list strictly from the matched scope
-  const rawCandidates: TseRawCandidate[] =
-    matchedAbr?.cand && Array.isArray(matchedAbr.cand) && matchedAbr.cand.length > 0
-      ? matchedAbr.cand
-      : rootMatchesScope && Array.isArray(rawJson.cand) && rawJson.cand.length > 0
-      ? rawJson.cand
-      : [];
+  // 4. Extract Candidate list strictly from matched scope or official carg structure
+  let rawCandidates: TseRawCandidate[] = [];
+  if (matchedAbr?.cand && Array.isArray(matchedAbr.cand) && matchedAbr.cand.length > 0) {
+    rawCandidates = matchedAbr.cand;
+  } else if (Array.isArray(rawJson.cand) && rawJson.cand.length > 0) {
+    rawCandidates = rawJson.cand;
+  } else if (Array.isArray(rawJson.carg) && rawJson.carg.length > 0) {
+    // Official 2026 layout: carg[0] -> agr[] -> par[] -> cand[]
+    for (const carg of rawJson.carg) {
+      if (Array.isArray(carg?.agr)) {
+        for (const agr of carg.agr) {
+          if (Array.isArray(agr?.par)) {
+            for (const par of agr.par) {
+              if (Array.isArray(par?.cand)) {
+                for (const c of par.cand) {
+                  rawCandidates.push({
+                    n: c.n,
+                    nm: c.nmu || c.nm,
+                    nmp: c.nm,
+                    sgp: par.sg || c.sgp,
+                    vap: c.vap,
+                    pvap: c.pvap,
+                    st: c.st,
+                    e: c.e,
+                    sqcand: c.sqcand
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
   if (rawCandidates.length === 0) {
     errors.push(`Nenhuma lista de candidatos encontrada para a abrangência "${targetScope}".`);
@@ -223,12 +250,17 @@ export function parseTseOfficialJson(
   }
 
   // 5. Extract Electoral Metrics strictly for the matched scope (Issue 6.2)
-  // If matchedAbr is defined, use its metrics exclusively.
-  // ONLY use root metrics if root itself matches the targetScope!
   const metricsSource = matchedAbr || (rootMatchesScope ? rawJson : null);
-  const totalSections = parseSafeInt(metricsSource?.s);
-  const totalizedSections = parseSafeInt(metricsSource?.st);
-  const pstNumber = parseSafeFloat(metricsSource?.pst);
+
+  const totalSections = parseSafeInt(
+    matchedAbr?.s ?? (typeof rawJson.s === 'object' && rawJson.s !== null ? (rawJson.s as any).ts : rawJson.s)
+  );
+  const totalizedSections = parseSafeInt(
+    matchedAbr?.st ?? (typeof rawJson.s === 'object' && rawJson.s !== null ? (rawJson.s as any).st : rawJson.st)
+  );
+  const pstNumber = parseSafeFloat(
+    matchedAbr?.pst ?? (typeof rawJson.s === 'object' && rawJson.s !== null ? (rawJson.s as any).pst : rawJson.pst)
+  );
 
   if (totalSections === null) {
     warnings.push('Campo "s" (total de seções) ausente ou inválido no arquivo oficial.');
@@ -240,11 +272,21 @@ export function parseTseOfficialJson(
     warnings.push('Campo "pst" (percentual totalizado) ausente ou inválido.');
   }
 
-  const validVotes = parseSafeInt(metricsSource?.vvc);
-  const nullVotes = parseSafeInt(metricsSource?.vn);
-  const blankVotes = parseSafeInt(metricsSource?.vb);
-  const abstentions = parseSafeInt(metricsSource?.a);
-  const votersEligible = parseSafeInt(metricsSource?.ea);
+  const validVotes = parseSafeInt(
+    matchedAbr?.vvc ?? (typeof rawJson.v === 'object' && rawJson.v !== null ? (rawJson.v as any).vvc : rawJson.vvc)
+  );
+  const nullVotes = parseSafeInt(
+    matchedAbr?.vn ?? (typeof rawJson.v === 'object' && rawJson.v !== null ? (rawJson.v as any).vn : rawJson.vn)
+  );
+  const blankVotes = parseSafeInt(
+    matchedAbr?.vb ?? (typeof rawJson.v === 'object' && rawJson.v !== null ? (rawJson.v as any).vb : rawJson.vb)
+  );
+  const abstentions = parseSafeInt(
+    matchedAbr?.a ?? (typeof rawJson.e === 'object' && rawJson.e !== null ? (rawJson.e as any).a : rawJson.a)
+  );
+  const votersEligible = parseSafeInt(
+    matchedAbr?.ea ?? (typeof rawJson.e === 'object' && rawJson.e !== null ? (rawJson.e as any).te : rawJson.ea)
+  );
 
   // 6. Parse Candidates safely: candidate number is null if missing, NEVER 0 (Issue 6.2)
   const candidateResults: CandidateResult[] = rawCandidates.map((c, idx) => {
