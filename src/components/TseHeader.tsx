@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { RefreshCw, Sun, Moon, ShieldCheck, AlertTriangle, Database, Upload, Globe, MapPin } from 'lucide-react';
+import { RefreshCw, Sun, Moon, ShieldCheck, AlertTriangle, Database, Upload, Globe, MapPin, Clock } from 'lucide-react';
 import { DataProvenance } from '../types/election';
 
 interface TseHeaderProps {
@@ -17,6 +17,8 @@ interface TseHeaderProps {
   isStale: boolean;
   dataHoraGeracaoTse: string | null;
   lastSuccessfulFetchAt: string | null;
+  dataAgeSeconds: number | null;
+  requestSucceeded: boolean;
   isLoading: boolean;
   onRefresh: () => void;
   onOpenImportModal: () => void;
@@ -34,6 +36,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
   isStale,
   dataHoraGeracaoTse,
   lastSuccessfulFetchAt,
+  dataAgeSeconds,
   isLoading,
   onRefresh,
   onOpenImportModal,
@@ -43,6 +46,15 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
   const formattedSyncTime = lastSuccessfulFetchAt
     ? new Date(lastSuccessfulFetchAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : null;
+
+  const formatAge = (seconds: number | null): string => {
+    if (seconds === null) return 'Desconhecida';
+    if (seconds < 60) return `${seconds}s atrás`;
+    const mins = Math.floor(seconds / 60);
+    if (mins < 60) return `${mins}m atrás`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h atrás`;
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900 text-white border-b border-slate-800 shadow-md">
@@ -101,12 +113,17 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
               Importar TSE
             </button>
 
-            <div className="hidden lg:flex flex-col text-right px-2 border-r border-slate-800">
-              <span className="text-[11px] font-semibold text-slate-200">
-                {dataHoraGeracaoTse ? `Geração TSE: ${dataHoraGeracaoTse}` : 'Aguardando Geração'}
+            {/* Separate Audit Timestamps & Data Age (Issue 7) */}
+            <div className="hidden lg:flex flex-col text-right px-2 border-r border-slate-800 text-[11px]">
+              <span className="font-semibold text-slate-200">
+                {dataHoraGeracaoTse ? `Geração TSE: ${dataHoraGeracaoTse}` : 'Aguardando Geração Oficial'}
               </span>
               <span className="text-[10px] text-slate-400 flex items-center gap-1 justify-end">
-                {formattedSyncTime ? `Consulta: ${formattedSyncTime}` : 'Sem sincronização ao vivo'}
+                <Clock className="w-2.5 h-2.5 text-slate-400" />
+                {formattedSyncTime ? `Consulta: ${formattedSyncTime}` : 'Sem consulta ao vivo'}
+                {dataAgeSeconds !== null && (
+                  <span className="text-slate-300 font-medium">({formatAge(dataAgeSeconds)})</span>
+                )}
                 {isStale && <span className="text-amber-400 font-bold">(dados salvos)</span>}
               </span>
             </div>
@@ -143,7 +160,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                2º Turno
+                2º Turno (Eleição 6258)
               </button>
               <button
                 onClick={() => onTurnChange(1)}
@@ -153,7 +170,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                1º Turno
+                1º Turno (Eleição 6257)
               </button>
             </div>
 

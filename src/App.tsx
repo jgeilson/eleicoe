@@ -10,7 +10,7 @@ import { TseHeader } from './components/TseHeader';
 import { NationalSummary } from './components/NationalSummary';
 import { StateCountryBreakdown } from './components/StateCountryBreakdown';
 import { ImportDataModal } from './components/ImportDataModal';
-import { AlertCircle, WifiOff } from 'lucide-react';
+import { WifiOff, ShieldCheck, Database, History } from 'lucide-react';
 
 export default function App() {
   const [presidentialData, setPresidentialData] = useState<PresidentialElectionData>(initialPresidentialData);
@@ -20,6 +20,8 @@ export default function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>('CACHE_FALLBACK');
   const [provenance, setProvenance] = useState<DataProvenance>('DEMONSTRATIVE_BASELINE');
+  const [requestSucceeded, setRequestSucceeded] = useState<boolean>(false);
+  const [dataAgeSeconds, setDataAgeSeconds] = useState<number | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isStale, setIsStale] = useState<boolean>(false);
   const [lastSuccessfulFetchAt, setLastSuccessfulFetchAt] = useState<string | null>(null);
@@ -46,6 +48,8 @@ export default function App() {
         if (result) {
           setFetchStatus(result.status);
           setProvenance(result.provenance);
+          setRequestSucceeded(result.requestSucceeded);
+          setDataAgeSeconds(result.dataAgeSeconds);
           setFetchError(result.fetchError);
           setIsStale(result.isStale);
           setLastSuccessfulFetchAt(result.lastSuccessfulFetchAt);
@@ -56,11 +60,13 @@ export default function App() {
         }
       } else {
         setFetchStatus('FETCH_ERROR');
+        setRequestSucceeded(false);
         setFetchError(`Erro HTTP ${response.status} ao conectar à API do TSE.`);
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setFetchStatus('FETCH_ERROR');
+        setRequestSucceeded(false);
         setFetchError(err.message || 'Falha ao consultar serviço de apuração.');
       }
     } finally {
@@ -114,6 +120,8 @@ export default function App() {
           isStale={isStale}
           dataHoraGeracaoTse={presidentialData.audit?.dataHoraGeracaoTse || null}
           lastSuccessfulFetchAt={lastSuccessfulFetchAt}
+          dataAgeSeconds={dataAgeSeconds}
+          requestSucceeded={requestSucceeded}
           isLoading={isLoading}
           onRefresh={() => fetchData(selectedScope, currentTurn)}
           onOpenImportModal={() => setIsImportModalOpen(true)}
@@ -129,11 +137,11 @@ export default function App() {
               <WifiOff className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <p className="font-extrabold text-amber-800 dark:text-amber-300">
-                  Status da Conexão Oficial: Modo Fallback / Cache
+                  Status da Conexão Oficial: {provenance === 'OFFICIAL_TSE_CACHE' ? 'Histórico em Cache' : 'Base de Espera'}
                 </p>
                 <p className="mt-0.5 text-amber-700 dark:text-amber-300/90">
-                  A consulta ao servidor do TSE retornou: <em>{fetchError}</em>.
-                  O painel está apresentando os últimos dados salvos auditados (ou base demonstrativa) e continuará tentando conectar automaticamente.
+                  A consulta ao servidor do TSE para o escopo <strong>{selectedScope}</strong> retornou: <em>{fetchError}</em>.
+                  O painel está apresentando os dados isolados deste escopo e continuará tentando conectar automaticamente a cada 60s.
                 </p>
               </div>
             </div>
@@ -142,7 +150,7 @@ export default function App() {
           {/* Key Highlights Banner */}
           <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-4 text-xs font-medium shadow-sm">
             <span className="font-bold uppercase tracking-wider text-amber-400 block mb-1">
-              📢 Painel de Auditoria e Apuração (Escopo: {selectedScope}):
+              📢 Painel de Apuração e Auditoria Oficial (Eleição {currentTurn === 2 ? '6258' : '6257'} • Escopo: {selectedScope}):
             </span>
             <ul className="list-disc list-inside space-y-1 text-slate-300">
               {presidentialData.keyHighlights.map((hl, idx) => (
@@ -180,19 +188,20 @@ export default function App() {
             setPresidentialData(newData);
             setProvenance(newData.audit?.provenance || 'MANUAL_IMPORT_UNVERIFIED');
             setFetchStatus('LIVE_UPDATED');
+            setRequestSucceeded(true);
           }}
         />
 
         {/* TSE Official Footer */}
         <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 mt-12 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
           <p className="font-semibold text-slate-700 dark:text-slate-300">
-            Tribunal Superior Eleitoral • Justiça Eleitoral
+            Tribunal Superior Eleitoral • Justiça Eleitoral (Eleições 2026)
           </p>
           <p className="mt-1">
-            Fonte: Sistema de Resultados e Divulgação da Justiça Eleitoral ({presidentialData.source}).
+            Fonte: Sistema de Resultados da Justiça Eleitoral ({presidentialData.source}).
           </p>
           <p className="text-[11px] text-slate-400 mt-1">
-            Procedência do Registro Atual: <strong>{provenance}</strong>
+            Procedência do Registro: <strong>{provenance}</strong>
             {presidentialData.audit?.contentHash && ` • Hash SHA-256: ${presidentialData.audit.contentHash.slice(0, 12)}...`}
           </p>
         </footer>

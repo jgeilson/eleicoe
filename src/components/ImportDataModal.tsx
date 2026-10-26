@@ -74,7 +74,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     try {
       if (pasteText.trim().startsWith('{')) {
         const rawJson: TseRawJson = JSON.parse(pasteText);
+        const turn: 1 | 2 = rawJson.t === '1' ? 1 : 2;
+        const scope = (rawJson.cdabr || rawJson.abr?.[0]?.cdabr || rawJson.tpabr || 'BR').toUpperCase();
+
         const parseResult = parseTseOfficialJson(rawJson, {
+          expectedTurn: turn,
+          expectedScope: scope,
           sourceVerified: false, // User pasted content is NOT sourceVerified by server
           provenance: 'MANUAL_IMPORT_UNVERIFIED',
           existingData: currentData
