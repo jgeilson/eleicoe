@@ -1,9 +1,10 @@
 import { PresidentialElectionData, ApiResponse, FetchStatus } from '../types/election.js';
 import { initialPresidentialData } from '../data/presidentialData.js';
+import { parseTseOfficialJson, TseRawJson } from '../utils/tseParser.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const PERSISTENT_CACHE_FILE = path.join('/tmp', 'tse_presidential_cache_v4.json');
+const PERSISTENT_CACHE_FILE = path.join('/tmp', 'tse_presidential_cache_v5.json');
 const OFFICIAL_TSE_ENDPOINT = 'https://resultados.tse.jus.br/oficial/ele2026/545/dados-simplificados/zz/zz-c0001-e000545-r.json';
 
 interface PersistentState {
@@ -18,7 +19,7 @@ export function computePresidentialSignature(data: PresidentialElectionData): st
   if (!data || !data.turno2) return '';
   const t2Votes = data.turno2.nationalCandidates.map((c) => `${c.id}:${c.votes}`).join('|');
   const t1Votes = data.turno1.nationalCandidates.map((c) => `${c.id}:${c.votes}`).join('|');
-  return `${t2Votes}#${t1Votes}`;
+  return `${t2Votes}#${t1Votes}#${data.dataHoraGeracaoTse || ''}`;
 }
 
 function loadPersistentState(): PersistentState {
@@ -100,13 +101,27 @@ export async function getOrFetchElectionData(
   if (fetchedContent) {
     try {
       if (fetchedContent.trim().startsWith('{')) {
-        const parsedJson = JSON.parse(fetchedContent);
-        if (parsedJson.turno2 || parsedJson.nationalCandidates || parsedJson.cand) {
+        const parsedTseRaw: TseRawJson = JSON.parse(fetchedContent);
+        const converted = parseTseOfficialJson(parsedTseRaw, currentState.data);
+
+        if (converted) {
           isLive = true;
-          status = 'LIVE_UPDATED';
-          currentState.dataUpdatedAt = new Date().toISOString();
-          savePersistentState(currentState);
+          const newSignature = computePresidentialSignature(converted);
+
+          if (newSignature !== currentState.signature) {
+            status = 'LIVE_UPDATED';
+            currentState.signature = newSignature;
+            currentState.dataUpdatedAt = new Date().toISOString();
+            currentState.data = converted;
+            savePersistentState(currentState);
+          } else {
+            status = 'LIVE_UNCHANGED';
+          }
+        } else {
+          fetchError = 'JSON recebido do TSE não contém o esquema de candidatos válido';
         }
+      } else {
+        fetchError = 'Resposta do TSE não está em formato JSON válido';
       }
     } catch (parseErr: any) {
       fetchError = `Falha ao processar resposta do TSE: ${parseErr.message}`;
@@ -114,7 +129,7 @@ export async function getOrFetchElectionData(
   }
 
   return {
-    success: true,
+    success: isLive || !!currentState.data,
     status,
     isLive,
     fetchError,

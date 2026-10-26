@@ -5,14 +5,23 @@
 
 import React from 'react';
 import { RoundData } from '../types/election';
-import { Award, Users, FileX, CheckCircle, BarChart3 } from 'lucide-react';
+import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface NationalSummaryProps {
   roundData: RoundData;
   locationName: string;
+  isOfficialValidated?: boolean;
+  dataHoraGeracaoTse?: string;
+  isDemonstrative?: boolean;
 }
 
-export const NationalSummary: React.FC<NationalSummaryProps> = ({ roundData, locationName }) => {
+export const NationalSummary: React.FC<NationalSummaryProps> = ({
+  roundData,
+  locationName,
+  isOfficialValidated,
+  dataHoraGeracaoTse,
+  isDemonstrative
+}) => {
   const { nationalCandidates, totalValidVotes, nullVotes, blankVotes, abstentions, votersEligible } = roundData;
 
   const validPct = votersEligible > 0 ? (totalValidVotes / votersEligible) * 100 : 0;
@@ -25,11 +34,20 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({ roundData, loc
       {/* Title & Status Badge */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Totalização Oficial
-            </span>
-            <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isOfficialValidated ? (
+              <span className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                Dados Oficiais Validados pelo TSE {dataHoraGeracaoTse ? `(${dataHoraGeracaoTse})` : ''}
+              </span>
+            ) : (
+              <span className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                {isDemonstrative ? 'Dados Demonstrativos / Não Verificados' : 'Aguardando Totalização Oficial do TSE'}
+              </span>
+            )}
+
+            <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
               {roundData.status}
             </span>
           </div>

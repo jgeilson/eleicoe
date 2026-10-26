@@ -50,6 +50,9 @@ export interface PresidentialElectionData {
   source: string;
   lastFetchedAt: string;
   dataUpdatedAt: string;
+  isOfficialValidated?: boolean;
+  isDemonstrative?: boolean;
+  dataHoraGeracaoTse?: string;
   turno1: RoundData;
   turno2: RoundData;
   keyHighlights: string[];

@@ -109,7 +109,13 @@ export default function App() {
           </div>
 
           {/* 1. National Candidate Cards & Electoral Metrics */}
-          <NationalSummary roundData={activeRoundData} locationName="Brasil & Exterior — Eleições Presidenciais 2026" />
+          <NationalSummary
+            roundData={activeRoundData}
+            locationName="Brasil & Exterior — Eleições Presidenciais 2026"
+            isOfficialValidated={presidentialData.isOfficialValidated}
+            dataHoraGeracaoTse={presidentialData.dataHoraGeracaoTse}
+            isDemonstrative={presidentialData.isDemonstrative}
+          />
 
           {/* 2. Detailed Breakdown by State (UFs) & Exterior (Zona ZZ) */}
           <StateCountryBreakdown locations={activeRoundData.locations} />
