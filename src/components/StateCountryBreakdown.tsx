@@ -79,7 +79,8 @@ export const StateCountryBreakdown: React.FC<StateCountryBreakdownProps> = ({
       if (loc.totalizedSections !== null) totalizedSections += loc.totalizedSections;
 
       for (const c of loc.candidates) {
-        const existing = candidateMap.get(c.id) || {
+        const candKey = c.number !== null && c.number !== undefined ? `num-${c.number}` : (c.shortName || c.name);
+        const existing = candidateMap.get(candKey) || {
           id: c.id,
           name: c.name,
           shortName: c.shortName,
@@ -92,7 +93,7 @@ export const StateCountryBreakdown: React.FC<StateCountryBreakdownProps> = ({
           existing.votes += c.votes;
           hasAnyVotes = true;
         }
-        candidateMap.set(c.id, existing);
+        candidateMap.set(candKey, existing);
       }
     }
 
