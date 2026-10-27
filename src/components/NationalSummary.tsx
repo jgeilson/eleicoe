@@ -9,34 +9,14 @@ import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck
 
 interface NationalSummaryProps {
   roundData: RoundData;
-  locationName: string;
+  locationName?: string;
   audit?: ProvenanceAudit;
-  cargoCode?: string;
-  selectedState?: string;
-  onStateChange?: (uf: string) => void;
 }
-
-const CARGO_TITLES: { [key: string]: string } = {
-  '0001': 'Presidente da República',
-  '0003': 'Governador',
-  '0005': 'Senador',
-  '0006': 'Deputado Federal',
-  '0007': 'Deputado Estadual'
-};
-
-const ALL_UFS = [
-  'SP', 'MG', 'RJ', 'BA', 'RS', 'PR', 'PE', 'CE', 'SC', 'GO',
-  'MA', 'PB', 'PA', 'ES', 'AM', 'RN', 'AL', 'PI', 'MT', 'DF',
-  'MS', 'SE', 'RO', 'TO', 'AC', 'AP', 'RR'
-];
 
 export const NationalSummary: React.FC<NationalSummaryProps> = ({
   roundData,
-  locationName,
-  audit,
-  cargoCode = '0001',
-  selectedState = 'SP',
-  onStateChange
+  locationName = 'Brasil',
+  audit
 }) => {
   const { nationalCandidates, totalValidVotes, nullVotes, blankVotes, abstentions, votersEligible } = roundData;
 
@@ -76,33 +56,14 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {cargoCode === '0001' ? locationName : `${CARGO_TITLES[cargoCode] || 'Cargo'} em ${selectedState}`} — {roundData.turnNumber}º Turno
-            </h2>
-            {cargoCode !== '0001' && onStateChange && (
-              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-xs">
-                <MapPin className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span className="text-xs font-bold text-amber-900 dark:text-amber-300">UF:</span>
-                <select
-                  value={selectedState}
-                  onChange={(e) => onStateChange(e.target.value)}
-                  className="bg-transparent text-sm font-black text-amber-950 dark:text-amber-200 focus:outline-hidden cursor-pointer"
-                >
-                  {ALL_UFS.map((uf) => (
-                    <option key={uf} value={uf} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                      {uf}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            {locationName} — {roundData.turnNumber}º Turno
+          </h2>
         </div>
 
         <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
           <Award className="w-4 h-4 text-amber-500" />
-          <span>Cargo: <strong>{CARGO_TITLES[cargoCode] || 'Presidente da República'}</strong></span>
+          <span>Cargo: <strong>Presidente da República</strong></span>
         </div>
       </div>
 
@@ -244,10 +205,9 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
         </div>
       </div>
 
-      {/* Future Perspective / Projection Card - Only for Presidente (cargoCode === '0001') */}
-      {cargoCode === '0001' && (
-        <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 rounded-2xl border border-indigo-500/30 p-6 text-white shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      {/* Future Perspective / Projection Card */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 rounded-2xl border border-indigo-500/30 p-6 text-white shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
           
           <div className="flex items-center justify-between mb-4 relative z-10 flex-wrap gap-3">
             <div className="flex items-center gap-2.5">
@@ -380,7 +340,6 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             </span>
           </div>
         </div>
-      )}
-    </div>
-  );
-};
+      </div>
+    );
+  };
