@@ -10,6 +10,9 @@ import { DataProvenance } from '../types/election';
 interface TseHeaderProps {
   currentTurn: 1 | 2;
   onTurnChange: (turn: 1 | 2) => void;
+  currentCargo: string;
+  onCargoChange: (cargo: string) => void;
+  selectedState?: string;
   totalizedSectionsPct: number | null;
   provenance: DataProvenance;
   isStale: boolean;
@@ -23,9 +26,20 @@ interface TseHeaderProps {
   onToggleDarkMode: () => void;
 }
 
+const CARGO_TITLES: { [key: string]: string } = {
+  '0001': 'Presidente',
+  '0003': 'Governador',
+  '0005': 'Senador',
+  '0006': 'Deputado Federal',
+  '0007': 'Deputado Estadual'
+};
+
 export const TseHeader: React.FC<TseHeaderProps> = ({
   currentTurn,
   onTurnChange,
+  currentCargo,
+  onCargoChange,
+  selectedState = 'SP',
   totalizedSectionsPct,
   provenance,
   isStale,
@@ -125,36 +139,69 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
 
         {/* Turn & Scope Filter Controls Bar */}
         <div className="py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
-          {/* Turn Tabs */}
+          {/* Turn & Cargo Tabs */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => onTurnChange(2)}
-                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  currentTurn === 2
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                2º Turno 
-              </button>
-              <button
-                onClick={() => onTurnChange(1)}
-                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  currentTurn === 1
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                1º Turno
-              </button>
+              {(() => {
+                const isSingleTurn = ['0005', '0006', '0007'].includes(currentCargo);
+                return (
+                  <>
+                    <button
+                      onClick={() => !isSingleTurn && onTurnChange(2)}
+                      disabled={isSingleTurn}
+                      title={isSingleTurn ? 'Cargo de turno único pela Constituição Federal (não há 2º turno)' : 'Visualizar apuração do 2º Turno'}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                        isSingleTurn
+                          ? 'opacity-40 cursor-not-allowed text-slate-600'
+                          : currentTurn === 2
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      2º Turno {isSingleTurn && <span className="text-[10px] ml-0.5 font-normal">(N/A)</span>}
+                    </button>
+                    <button
+                      onClick={() => onTurnChange(1)}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                        currentTurn === 1
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      1º Turno
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto">
+              {[
+                { code: '0001', label: 'Presidente' },
+                { code: '0003', label: 'Governador' },
+                { code: '0005', label: 'Senador' },
+                { code: '0006', label: 'Dep. Federal' },
+                { code: '0007', label: 'Dep. Estadual' }
+              ].map((c) => (
+                <button
+                  key={c.code}
+                  onClick={() => onCargoChange(c.code)}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-xs whitespace-nowrap transition-all ${
+                    currentCargo === c.code
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Section Progress Bar */}
           <div className="w-full md:w-auto flex items-center justify-between md:justify-start gap-3 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
             <span className="text-slate-300 font-medium text-nowrap">
-              Seções Apuradas (Brasil):
+              Seções Apuradas ({currentCargo === '0001' ? 'Brasil' : selectedState}):
             </span>
             {totalizedSectionsPct !== null ? (
               <>

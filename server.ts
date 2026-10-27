@@ -105,7 +105,13 @@ const handleApiRequest = async (req: express.Request, res: express.Response) => 
       turn = turnStr === '1' ? 1 : 2;
     }
 
-    const result = await getOrFetchElectionData({ scope: rawScope, turn });
+    let cargo = '0001';
+    const providedCargo = req.query?.cargo ?? req.body?.cargo;
+    if (providedCargo !== undefined) {
+      cargo = String(providedCargo).trim().padStart(4, '0');
+    }
+
+    const result = await getOrFetchElectionData({ scope: rawScope, turn, cargo });
     return res.json(result);
   } catch (error: any) {
     return res.status(500).json({

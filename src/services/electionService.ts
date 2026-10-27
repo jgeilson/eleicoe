@@ -10,7 +10,7 @@ import {
   DataProvenance,
   TseSnapshotMetadata
 } from '../types/election.js';
-import { initialPresidentialData } from '../data/presidentialData.js';
+import { initialPresidentialData, getInitialDataForCargo } from '../data/presidentialData.js';
 import { parseTseOfficialJson, TseRawJson } from '../utils/tseParser.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -186,15 +186,18 @@ export async function resolveActiveElectionConfig(forceRefresh: boolean = false)
  * Pattern: .../ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-u.json
  * Suffix: -u.json (Totalização de cargo)
  */
-export function buildDocumentedTseUrl(scope: TseScope, electionCode: string): string {
+export function buildDocumentedTseUrl(scope: TseScope, electionCode: string, cargo: string = '0001'): string {
   const scopeLower = scope.toLowerCase();
-  return `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-u.json`;
+  const formattedCargo = cargo.padStart(4, '0');
+  const formattedElection = electionCode.padStart(6, '0');
+  return `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c${formattedCargo}-e${formattedElection}-u.json`;
 }
 
 interface MasterCacheEntry {
   cacheKey: string;
   electionCode: string;
   turn: 1 | 2;
+  cargo: string;
   data: PresidentialElectionData;
   scopeHashes: { [scope: string]: string };
   lastSuccessfulFetchAt: string | null;
@@ -204,16 +207,16 @@ interface MasterCacheEntry {
 
 const memoryMasterCacheMap = new Map<string, MasterCacheEntry>();
 
-function getMasterCacheFilePath(electionCode: string, turn: number): string {
-  return path.join(SCOPED_CACHE_DIR, `cache_${electionCode}_t${turn}_master_v12.json`);
+function getMasterCacheFilePath(electionCode: string, turn: number, cargo: string): string {
+  return path.join(SCOPED_CACHE_DIR, `cache_${electionCode}_t${turn}_c${cargo}_master_v13.json`);
 }
 
-function loadMasterCache(electionCode: string, turn: 1 | 2): MasterCacheEntry {
-  const cacheKey = `${electionCode}_t${turn}_master`;
+function loadMasterCache(electionCode: string, turn: 1 | 2, cargo: string): MasterCacheEntry {
+  const cacheKey = `${electionCode}_t${turn}_c${cargo}_master`;
   const inMemory = memoryMasterCacheMap.get(cacheKey);
   if (inMemory) return inMemory;
 
-  const filePath = getMasterCacheFilePath(electionCode, turn);
+  const filePath = getMasterCacheFilePath(electionCode, turn, cargo);
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf8');
@@ -227,13 +230,14 @@ function loadMasterCache(electionCode: string, turn: 1 | 2): MasterCacheEntry {
     console.warn(`Erro ao carregar master cache para ${cacheKey}:`, err);
   }
 
-  const isolatedData: PresidentialElectionData = JSON.parse(JSON.stringify(initialPresidentialData));
+  const isolatedData: PresidentialElectionData = getInitialDataForCargo(cargo, electionCode);
   isolatedData.audit.codigoEleicao = electionCode;
 
   const masterEntry: MasterCacheEntry = {
     cacheKey,
     electionCode,
     turn,
+    cargo,
     data: isolatedData,
     scopeHashes: {},
     lastSuccessfulFetchAt: null,
@@ -247,7 +251,7 @@ function loadMasterCache(electionCode: string, turn: 1 | 2): MasterCacheEntry {
 
 function saveMasterCache(entry: MasterCacheEntry) {
   memoryMasterCacheMap.set(entry.cacheKey, entry);
-  const filePath = getMasterCacheFilePath(entry.electionCode, entry.turn);
+  const filePath = getMasterCacheFilePath(entry.electionCode, entry.turn, entry.cargo);
   try {
     fs.writeFileSync(filePath, JSON.stringify(entry), 'utf8');
   } catch (err) {
@@ -340,6 +344,7 @@ async function fetchTseEndpointSecurely(url: string): Promise<{ ok: boolean; sta
 export async function getOrFetchElectionData(params?: {
   scope?: string;
   turn?: 1 | 2;
+  cargo?: string;
 }): Promise<ApiResponse> {
   const lastAttemptedFetchAt = new Date().toISOString();
 
@@ -390,15 +395,34 @@ export async function getOrFetchElectionData(params?: {
 
   const validScope = rawScope as TseScope;
   const turn: 1 | 2 = params?.turn === 1 ? 1 : 2;
+  const cargo = params?.cargo || '0001';
 
-  const electionConfig = await resolveActiveElectionConfig();
-  const electionCode = turn === 1 ? electionConfig.codeTurno1 : electionConfig.codeTurno2;
+  const isFederalCargo = cargo === '0001';
+  // Proportional positions and Senators are strictly 1st-round only in Brazilian electoral law (CF/88)
+  const isSingleTurnOnly = ['0005', '0006', '0007'].includes(cargo);
+  const effectiveTurn: 1 | 2 = isSingleTurnOnly ? 1 : turn;
 
-  const masterCache = loadMasterCache(electionCode, turn);
+  let electionCode = '';
+  let configOrigin: 'TSE_OFFICIAL_CONFIG' | 'VALIDATED_FALLBACK' = 'VALIDATED_FALLBACK';
+
+  if (isFederalCargo) {
+    const electionConfig = await resolveActiveElectionConfig();
+    electionCode = effectiveTurn === 1 ? electionConfig.codeTurno1 : electionConfig.codeTurno2;
+    configOrigin = electionConfig.source;
+  } else {
+    // Estadual elections (Governador, Senador, Deputados)
+    // 6259: 1º Turno Estadual, 6260: 2º Turno Estadual
+    electionCode = effectiveTurn === 1 ? '6259' : '6260';
+    configOrigin = 'TSE_OFFICIAL_CONFIG';
+  }
+
+  const masterCache = loadMasterCache(electionCode, effectiveTurn, cargo);
   masterCache.lastAttemptedFetchAt = lastAttemptedFetchAt;
 
-  // Concurrently fetch requested scope and all other scopes in ALLOWED_SCOPES simultaneously
-  const scopesToFetch = Array.from(new Set([validScope, ...ALLOWED_SCOPES]));
+  // Determine target scope to fetch:
+  // For state elections (Governador, Senador, etc.), BR and ZZ do not exist in TSE.
+  const targetScope: TseScope = (!isFederalCargo && (validScope === 'BR' || validScope === 'ZZ')) ? 'SP' : validScope;
+  const scopesToFetch: TseScope[] = [targetScope];
 
   let requestSucceeded = false;
   let isLive = false;
@@ -406,57 +430,62 @@ export async function getOrFetchElectionData(params?: {
 
   await Promise.all(
     scopesToFetch.map(async (s) => {
-      const sUrl = buildDocumentedTseUrl(s, electionCode);
+      const sUrl = buildDocumentedTseUrl(s, electionCode, cargo);
       const netRes = await fetchTseEndpointSecurely(sUrl);
       if (netRes.ok && netRes.text) {
         try {
           const sHash = crypto.createHash('sha256').update(netRes.text).digest('hex');
           const sJson = JSON.parse(netRes.text);
           const parseRes = parseTseOfficialJson(sJson, {
-            expectedTurn: turn,
+            expectedTurn: effectiveTurn,
             expectedScope: s,
             expectedElectionCode: electionCode,
+            expectedCargo: cargo,
             sourceVerified: true,
             provenance: 'OFFICIAL_TSE_LIVE',
             sourceUrl: sUrl,
             rawContentHash: sHash,
-            configOrigin: electionConfig.source,
+            configOrigin,
             existingData: masterCache.data
           });
 
           if (parseRes.success && parseRes.data) {
             masterCache.scopeHashes[s] = sHash;
-            if (s === validScope) {
-              requestSucceeded = true;
-              isLive = true;
-              masterCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
-              if (sHash !== masterCache.scopeHashes[`${s}_prev`]) {
-                masterCache.scopeHashes[`${s}_prev`] = sHash;
-                masterCache.lastContentChangeAt = lastAttemptedFetchAt;
-              }
-              // Record snapshot for primary requested scope
-              const activeRound = turn === 2 ? parseRes.data.turno2 : parseRes.data.turno1;
-              recordFullSnapshot({
-                snapshotId: `${electionCode}_t${turn}_${s}_${Date.now()}`,
-                electionCode,
-                turn,
-                scope: s,
-                dataHoraGeracaoTse: parseRes.data.audit.dataHoraGeracaoTse,
-                retrievedAt: lastAttemptedFetchAt,
-                contentHash: sHash,
-                totalValidVotes: activeRound.totalValidVotes,
-                totalizedSectionsPct: activeRound.totalizedSectionsPct,
-                totalSections: activeRound.totalSections,
-                totalizedSections: activeRound.totalizedSections,
-                votersEligible: activeRound.votersEligible,
-                abstentions: activeRound.abstentions,
-                candidates: activeRound.nationalCandidates
-              }, netRes.text);
+            requestSucceeded = true;
+            isLive = true;
+            masterCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
+            if (sHash !== masterCache.scopeHashes[`${s}_prev`]) {
+              masterCache.scopeHashes[`${s}_prev`] = sHash;
+              masterCache.lastContentChangeAt = lastAttemptedFetchAt;
             }
+            // Record snapshot for primary requested scope
+            const activeRound = effectiveTurn === 2 ? parseRes.data.turno2 : parseRes.data.turno1;
+            recordFullSnapshot({
+              snapshotId: `${electionCode}_t${effectiveTurn}_${s}_${Date.now()}`,
+              electionCode,
+              turn: effectiveTurn,
+              scope: s,
+              dataHoraGeracaoTse: parseRes.data.audit.dataHoraGeracaoTse,
+              retrievedAt: lastAttemptedFetchAt,
+              contentHash: sHash,
+              totalValidVotes: activeRound.totalValidVotes,
+              totalizedSectionsPct: activeRound.totalizedSectionsPct,
+              totalSections: activeRound.totalSections,
+              totalizedSections: activeRound.totalizedSections,
+              votersEligible: activeRound.votersEligible,
+              abstentions: activeRound.abstentions,
+              candidates: activeRound.nationalCandidates
+            }, netRes.text);
           }
         } catch {}
-      } else if (s === validScope) {
-        fetchError = netRes.error || `Falha HTTP ao consultar ${s}`;
+      } else {
+        if (cargo === '0003' && turn === 2 && netRes.status === 404) {
+          fetchError = `Apuração de 2º Turno para Governador (eleição 6260) ainda não está disponível no TSE para ${s}. Alterne para o 1º Turno (eleição 6259).`;
+        } else if (isSingleTurnOnly && turn === 2) {
+          fetchError = `Senador e Deputados são cargos de turno único (CF/88). Não existe 2º Turno (eleição 6260). Consulte o 1º Turno (eleição 6259).`;
+        } else {
+          fetchError = netRes.error || `Falha HTTP ao consultar ${s}`;
+        }
       }
     })
   );
@@ -488,7 +517,25 @@ export async function getOrFetchElectionData(params?: {
     dataAgeSeconds = Math.round((Date.now() - new Date(timeBasis).getTime()) / 1000);
   }
 
-  const activeRound = turn === 2 ? masterCache.data.turno2 : masterCache.data.turno1;
+  const activeRound = effectiveTurn === 2 ? masterCache.data.turno2 : masterCache.data.turno1;
+
+  // When viewing state elections (Governador, Senador, Deputados):
+  if (!isFederalCargo) {
+    const focusUf = targetScope;
+    const focusLoc = activeRound.locations.find((l) => l.ufOrCode === focusUf);
+    if (focusLoc && focusLoc.candidates && focusLoc.candidates.length > 0) {
+      activeRound.nationalCandidates = focusLoc.candidates;
+      activeRound.totalValidVotes = focusLoc.totalValidVotes;
+      activeRound.totalizedSectionsPct = focusLoc.totalizedSectionsPct;
+      activeRound.totalSections = focusLoc.totalSections;
+      activeRound.totalizedSections = focusLoc.totalizedSections;
+      activeRound.nullVotes = focusLoc.nullVotes;
+      activeRound.blankVotes = focusLoc.blankVotes;
+      activeRound.abstentions = focusLoc.abstentions;
+      activeRound.votersEligible = focusLoc.votersEligible;
+    }
+  }
+
   const dataAvailable = activeRound.totalValidVotes !== null && activeRound.totalValidVotes > 0;
 
   return {
@@ -499,7 +546,7 @@ export async function getOrFetchElectionData(params?: {
     status: fetchStatus,
     provenance,
     scope: validScope,
-    turn,
+    turn: effectiveTurn,
     isLive,
     isStale,
     dataAgeSeconds,

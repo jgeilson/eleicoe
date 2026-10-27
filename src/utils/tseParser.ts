@@ -73,6 +73,7 @@ export interface ParseOptions {
   expectedTurn: 1 | 2;
   expectedScope: string; // 'BR', 'SP', 'ZZ', etc.
   expectedElectionCode: string; // '6257' ou '6258' (Mandatory for strict validation - Issue 6.1)
+  expectedCargo?: string; // '0001', '0003', etc.
   sourceVerified: boolean;
   provenance: DataProvenance;
   sourceUrl?: string;
@@ -170,12 +171,13 @@ export function parseTseOfficialJson(
     );
   }
 
-  // 2.5. Strict Presidential Cargo Validation (Issue 6.1: Mandatory when present)
+  // 2.5. Strict Cargo Validation (Mandatory when present)
+  const expectedCargo = (options.expectedCargo || '0001').padStart(4, '0');
   if (rawJson.carag !== undefined && rawJson.carag !== null && String(rawJson.carag).trim() !== '') {
-    const caragStr = String(rawJson.carag).trim();
-    if (caragStr !== '1') {
+    const caragStr = String(rawJson.carag).trim().padStart(4, '0');
+    if (caragStr !== expectedCargo) {
       errors.push(
-        `Cargo incompatível: esperado código "1" (Presidente da República), recebido "${rawJson.carag}".`
+        `Cargo incompatível: esperado código "${expectedCargo}", recebido "${rawJson.carag}".`
       );
     }
   }
