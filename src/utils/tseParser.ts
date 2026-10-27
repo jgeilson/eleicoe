@@ -41,6 +41,7 @@ export interface TseRawAbr {
   tf?: string; // Totalização finalizada ('s'/'n')
   esae?: string; // Situação apurada ('s'/'n')
   cand?: TseRawCandidate[]; // Lista de candidatos aninhada na abrangência
+  [key: string]: any;
 }
 
 export interface TseRawJson {
@@ -65,6 +66,7 @@ export interface TseRawJson {
   esae?: string; // Situação apurada ('s'/'n')
   cand?: TseRawCandidate[]; // Candidatos na raiz
   abr?: TseRawAbr[]; // Abrangências (estrutura oficial)
+  [key: string]: any;
 }
 
 export interface ParseOptions {
@@ -213,11 +215,49 @@ export function parseTseOfficialJson(
   let rawCandidates: TseRawCandidate[] = [];
   if (matchedAbr?.cand && Array.isArray(matchedAbr.cand) && matchedAbr.cand.length > 0) {
     rawCandidates = matchedAbr.cand;
-  } else if (Array.isArray(rawJson.cand) && rawJson.cand.length > 0) {
+  } else if (matchedAbr?.cp && Array.isArray(matchedAbr.cp)) {
+    for (const cp of matchedAbr.cp) {
+      if (Array.isArray(cp?.cand) && cp.cand.length > 0) {
+        rawCandidates = cp.cand;
+        break;
+      }
+      if (Array.isArray(cp?.agr)) {
+        for (const agr of cp.agr) {
+          if (Array.isArray(agr?.par)) {
+            for (const par of agr.par) {
+              if (Array.isArray(par?.cand)) {
+                for (const c of par.cand) {
+                  rawCandidates.push({
+                    n: c.n,
+                    nm: c.nmu || c.nm,
+                    nmp: c.nm,
+                    sgp: par.sg || c.sgp,
+                    vap: c.vap,
+                    pvap: c.pvap,
+                    st: c.st,
+                    e: c.e,
+                    sqcand: c.sqcand
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (rawCandidates.length === 0 && Array.isArray(rawJson.cand) && rawJson.cand.length > 0) {
     rawCandidates = rawJson.cand;
-  } else if (Array.isArray(rawJson.carg) && rawJson.carg.length > 0) {
-    // Official 2026 layout: carg[0] -> agr[] -> par[] -> cand[]
+  }
+
+  if (rawCandidates.length === 0 && Array.isArray(rawJson.carg) && rawJson.carg.length > 0) {
+    // Official 2026 layout: carg[0] -> agr[] -> par[] -> cand[] or cp[]
     for (const carg of rawJson.carg) {
+      if (Array.isArray(carg?.cand) && carg.cand.length > 0) {
+        rawCandidates = carg.cand;
+        break;
+      }
       if (Array.isArray(carg?.agr)) {
         for (const agr of carg.agr) {
           if (Array.isArray(agr?.par)) {
@@ -238,6 +278,14 @@ export function parseTseOfficialJson(
                 }
               }
             }
+          }
+        }
+      }
+      if (Array.isArray(carg?.cp)) {
+        for (const cp of carg.cp) {
+          if (Array.isArray(cp?.cand) && cp.cand.length > 0) {
+            rawCandidates = cp.cand;
+            break;
           }
         }
       }
@@ -282,7 +330,7 @@ export function parseTseOfficialJson(
     matchedAbr?.vb ?? (typeof rawJson.v === 'object' && rawJson.v !== null ? (rawJson.v as any).vb : rawJson.vb)
   );
   const abstentions = parseSafeInt(
-    matchedAbr?.a ?? (typeof rawJson.e === 'object' && rawJson.e !== null ? (rawJson.e as any).a : rawJson.a)
+    matchedAbr?.a ?? (typeof rawJson.e === 'object' && rawJson.e !== null ? (rawJson.e as any).a : rawJson.e)
   );
   const votersEligible = parseSafeInt(
     matchedAbr?.ea ?? (typeof rawJson.e === 'object' && rawJson.e !== null ? (rawJson.e as any).te : rawJson.ea)
@@ -324,11 +372,6 @@ export function parseTseOfficialJson(
   candidateResults.sort((a, b) => (b.votes || 0) - (a.votes || 0));
 
   // 7. Determine Official Election Status safely (Issue 6.3: preserve distinctions)
-  // - ELEIÇÃO DEFINIDA: apenas se a eleição tiver proclamação/situação apurada oficial (esae === 's')
-  //   OU candidato 'Eleito' com totalização já concluída (tf === 's' ou pst === 100).
-  // - TOTALIZADO: se a apuração de seções concluiu 100%, mas ainda aguarda proclamação oficial
-  // - EM APURAÇÃO: se houver apuração parcial em andamento
-  // - AGUARDANDO: se a apuração ainda não começou
   let status: 'ELEIÇÃO DEFINIDA' | 'TOTALIZADO' | 'EM APURAÇÃO' | 'AGUARDANDO' = 'EM APURAÇÃO';
 
   const isTotalizationFinished = (metricsSource?.tf) === 's' || (pstNumber !== null && pstNumber >= 100);
@@ -348,6 +391,45 @@ export function parseTseOfficialJson(
   const dataHoraTse =
     rawJson.dg && rawJson.hg ? `${rawJson.dg} às ${rawJson.hg}` : undefined;
 
+  // Update existingData (BR national totals or UF locations)
+  if (options.existingData) {
+    const targetRound = options.expectedTurn === 2 ? options.existingData.turno2 : options.existingData.turno1;
+    if (targetRound) {
+      if (targetScope === 'BR') {
+        targetRound.status = status;
+        targetRound.totalizedSectionsPct = pstNumber !== null ? pstNumber : targetRound.totalizedSectionsPct;
+        targetRound.totalSections = totalSections !== null ? totalSections : targetRound.totalSections;
+        targetRound.totalizedSections = totalizedSections !== null ? totalizedSections : targetRound.totalizedSections;
+        targetRound.totalValidVotes = validVotes !== null ? validVotes : targetRound.totalValidVotes;
+        targetRound.nullVotes = nullVotes !== null ? nullVotes : targetRound.nullVotes;
+        targetRound.blankVotes = blankVotes !== null ? blankVotes : targetRound.blankVotes;
+        targetRound.abstentions = abstentions !== null ? abstentions : targetRound.abstentions;
+        targetRound.votersEligible = votersEligible !== null ? votersEligible : targetRound.votersEligible;
+        targetRound.nationalCandidates = candidateResults;
+      } else if (Array.isArray(targetRound.locations)) {
+        for (const loc of targetRound.locations) {
+          if (loc.ufOrCode.toUpperCase() === targetScope) {
+            loc.totalizedSectionsPct = pstNumber !== null ? pstNumber : loc.totalizedSectionsPct;
+            loc.totalSections = totalSections !== null ? totalSections : loc.totalSections;
+            loc.totalizedSections = totalizedSections !== null ? totalizedSections : loc.totalizedSections;
+            loc.totalValidVotes = validVotes !== null ? validVotes : loc.totalValidVotes;
+            loc.nullVotes = nullVotes !== null ? nullVotes : loc.nullVotes;
+            loc.blankVotes = blankVotes !== null ? blankVotes : loc.blankVotes;
+            loc.abstentions = abstentions !== null ? abstentions : loc.abstentions;
+            loc.votersEligible = votersEligible !== null ? votersEligible : loc.votersEligible;
+            loc.statusDescription = status === 'ELEIÇÃO DEFINIDA' ? 'Apuração Concluída (Eleição Definida)' : status;
+            loc.isImported = true;
+            loc.candidates = candidateResults;
+          }
+        }
+      }
+    }
+  }
+
+  const updatedLocations = options.existingData
+    ? (options.expectedTurn === 2 ? options.existingData.turno2.locations : options.existingData.turno1.locations)
+    : [];
+
   const roundData: RoundData = {
     turnNumber: options.expectedTurn,
     status,
@@ -360,9 +442,7 @@ export function parseTseOfficialJson(
     abstentions,
     votersEligible,
     nationalCandidates: candidateResults,
-    locations: options.existingData
-      ? (options.expectedTurn === 2 ? options.existingData.turno2.locations : options.existingData.turno1.locations)
-      : []
+    locations: updatedLocations
   };
 
   const audit: ProvenanceAudit = {

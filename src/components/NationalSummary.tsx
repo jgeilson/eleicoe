@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { RoundData, ProvenanceAudit } from '../types/election';
-import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck, Database, Upload } from 'lucide-react';
+import { Award, Users, FileX, CheckCircle, BarChart3, AlertTriangle, ShieldCheck, Database, Upload, TrendingUp } from 'lucide-react';
 
 interface NationalSummaryProps {
   roundData: RoundData;
@@ -48,12 +48,6 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
               <span className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
                 <Upload className="w-3.5 h-3.5 text-purple-500" />
                 Importação Manual (Não Verificada pelo TSE)
-              </span>
-            )}
-            {(!audit || audit.provenance === 'DEMONSTRATIVE_BASELINE') && (
-              <span className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                Aguardando Apuração Oficial
               </span>
             )}
 
@@ -174,20 +168,33 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
             <FileX className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-semibold">Brancos & Nulos</span>
+            <span className="text-xs font-semibold">Votos Brancos (Taxa)</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {blankVotes !== null && nullVotes !== null ? (blankVotes + nullVotes).toLocaleString('pt-BR') : '—'}
+            {blankVotes !== null ? blankVotes.toLocaleString('pt-BR') : '—'}
           </p>
           <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-            {blankPct !== null && nullPct !== null ? `${(blankPct + nullPct).toFixed(1).replace('.', ',')}% do total` : 'Aguardando apuração'}
+            {blankPct !== null ? `${blankPct.toFixed(1).replace('.', ',')}% do eleitorado` : 'Aguardando apuração'}
+          </span>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
+            <FileX className="w-4 h-4 text-rose-500" />
+            <span className="text-xs font-semibold">Votos Nulos (Taxa)</span>
+          </div>
+          <p className="text-lg font-extrabold text-slate-900 dark:text-white">
+            {nullVotes !== null ? nullVotes.toLocaleString('pt-BR') : '—'}
+          </p>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+            {nullPct !== null ? `${nullPct.toFixed(1).replace('.', ',')}% do eleitorado` : 'Aguardando apuração'}
           </span>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
             <Users className="w-4 h-4 text-blue-500" />
-            <span className="text-xs font-semibold">Abstenção</span>
+            <span className="text-xs font-semibold">Ausentes / Abstenção</span>
           </div>
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">
             {abstentions !== null ? abstentions.toLocaleString('pt-BR') : '—'}
@@ -196,17 +203,142 @@ export const NationalSummary: React.FC<NationalSummaryProps> = ({
             {abstentionPct !== null ? `${abstentionPct.toFixed(1).replace('.', ',')}% de abstenção` : 'Aguardando apuração'}
           </span>
         </div>
+      </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
-            <CheckCircle className="w-4 h-4 text-purple-500" />
-            <span className="text-xs font-semibold">Aptos a Votar</span>
+      {/* Future Perspective / Projection Card */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 rounded-2xl border border-indigo-500/30 p-6 text-white shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        
+        <div className="flex items-center justify-between mb-4 relative z-10 flex-wrap gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-indigo-400">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
+                Projeção
+              </h3>
+              <p className="text-xs text-indigo-200/80 font-medium">
+                {roundData.totalizedSectionsPct !== null ? `${roundData.totalizedSectionsPct.toFixed(1).replace('.', ',')}% totalizados` : '100% totalizados'}
+              </p>
+            </div>
           </div>
-          <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-            {votersEligible !== null ? votersEligible.toLocaleString('pt-BR') : '—'}
-          </p>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-            {votersEligible !== null ? '100% Eleitorado' : 'Aguardando'}
+        </div>
+
+        {/* State-Weighted Projection Calculation Helper */}
+        {(() => {
+          const candidateProjections: { [candidateId: string]: { projectedVotes: number; name: string; party: string; color: string } } = {};
+          nationalCandidates.forEach(c => {
+            candidateProjections[c.id] = {
+              projectedVotes: 0,
+              name: c.name,
+              party: c.party,
+              color: c.color
+            };
+          });
+
+          let totalProjectedValid = 0;
+          let hasValidLocations = false;
+
+          if (roundData.locations && roundData.locations.length > 0) {
+            roundData.locations.forEach(loc => {
+              const pct = loc.totalizedSectionsPct;
+              const scaleFactor = (pct !== null && pct > 0 && pct < 100) ? (100 / pct) : 1;
+              if (pct !== null && pct > 0) {
+                hasValidLocations = true;
+              }
+
+              const locValid = loc.totalValidVotes || 0;
+              totalProjectedValid += Math.round(locValid * scaleFactor);
+
+              loc.candidates.forEach(cand => {
+                const baseCand = nationalCandidates.find(nc => nc.shortName === cand.shortName || nc.number === cand.number);
+                if (baseCand && candidateProjections[baseCand.id]) {
+                  const currentVotes = cand.votes || 0;
+                  candidateProjections[baseCand.id].projectedVotes += Math.round(currentVotes * scaleFactor);
+                }
+              });
+            });
+          }
+
+          // Fallback if no location breakdown is present
+          const projectionsList = (!hasValidLocations || Object.keys(candidateProjections).length === 0)
+            ? nationalCandidates.map(c => {
+                const globalPct = roundData.totalizedSectionsPct;
+                const scale = (globalPct !== null && globalPct > 0 && globalPct < 100) ? (100 / globalPct) : 1;
+                const pVotes = c.votes !== null ? Math.round(c.votes * scale) : 0;
+                const pTotal = totalValidVotes !== null ? Math.round(totalValidVotes * scale) : 0;
+                const pPct = pTotal > 0 ? (pVotes / pTotal) * 100 : c.percentage;
+                return {
+                  id: c.id,
+                  name: c.name,
+                  party: c.party,
+                  color: c.color,
+                  projectedVotes: pVotes,
+                  projectedPercentage: pPct
+                };
+              })
+            : Object.entries(candidateProjections).map(([id, data]) => {
+                const pPct = totalProjectedValid > 0 ? (data.projectedVotes / totalProjectedValid) * 100 : 0;
+                return {
+                  id,
+                  name: data.name,
+                  party: data.party,
+                  color: data.color,
+                  projectedVotes: data.projectedVotes,
+                  projectedPercentage: pPct
+                };
+              });
+
+          return (
+            <>
+              {/* Projection content cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10 mt-4">
+                {projectionsList.map((proj) => (
+                  <div key={proj.id} className="bg-white/5 dark:bg-slate-800/60 border border-white/10 rounded-xl p-4 backdrop-blur-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: proj.color }}
+                        ></span>
+                        <span className="text-sm font-bold text-white truncate max-w-[180px] sm:max-w-[220px]">
+                          {proj.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {proj.party}
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline justify-between mt-3">
+                      <div>
+                        <p className="text-xs text-slate-400">Projeção de Votos</p>
+                        <p className="text-lg font-extrabold text-white tracking-tight mt-0.5 tabular-nums">
+                          {proj.projectedVotes.toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-slate-400">Percentual Estimado</p>
+                        <p className="text-xl font-black text-indigo-400 tracking-tight mt-0.5 tabular-nums">
+                          {proj.projectedPercentage.toFixed(1).replace('.', ',')}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              
+            </>
+          );
+        })()}
+
+        <div className="mt-4 pt-3 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2 relative z-10">
+          <span>
+            {roundData.totalizedSectionsPct !== null && roundData.totalizedSectionsPct < 100
+              ? `Restam aproximadamente ${(100 - roundData.totalizedSectionsPct).toFixed(1).replace('.', ',')}% das seções eleitorais.`
+              : 'Apuração 100% concluída.'}
           </span>
         </div>
       </div>

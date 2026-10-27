@@ -4,14 +4,12 @@
  */
 
 import React from 'react';
-import { RefreshCw, Sun, Moon, ShieldCheck, AlertTriangle, Database, Upload, Globe, MapPin, Clock } from 'lucide-react';
+import { RefreshCw, Sun, Moon, ShieldCheck, AlertTriangle, Database, Globe, MapPin, Clock } from 'lucide-react';
 import { DataProvenance } from '../types/election';
 
 interface TseHeaderProps {
   currentTurn: 1 | 2;
   onTurnChange: (turn: 1 | 2) => void;
-  selectedScope: string;
-  onScopeChange: (scope: string) => void;
   totalizedSectionsPct: number | null;
   provenance: DataProvenance;
   isStale: boolean;
@@ -21,7 +19,6 @@ interface TseHeaderProps {
   requestSucceeded: boolean;
   isLoading: boolean;
   onRefresh: () => void;
-  onOpenImportModal: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
 }
@@ -29,8 +26,6 @@ interface TseHeaderProps {
 export const TseHeader: React.FC<TseHeaderProps> = ({
   currentTurn,
   onTurnChange,
-  selectedScope,
-  onScopeChange,
   totalizedSectionsPct,
   provenance,
   isStale,
@@ -39,7 +34,6 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
   dataAgeSeconds,
   isLoading,
   onRefresh,
-  onOpenImportModal,
   darkMode,
   onToggleDarkMode
 }) => {
@@ -62,32 +56,23 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
         {/* Top Branding & Provenance Bar */}
         <div className="h-16 flex items-center justify-between border-b border-slate-800/80 gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-md shrink-0">
-              ⚖️
-            </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-extrabold text-white text-base md:text-lg tracking-tight leading-tight">
-                  TSE • Divulgação de Resultados
+                  Divulgação de Resultados
                 </h1>
 
                 {/* Provenance Badge */}
                 {provenance === 'OFFICIAL_TSE_LIVE' && (
                   <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    TSE Ao Vivo Autenticado
+                    Conectado
                   </span>
                 )}
                 {provenance === 'OFFICIAL_TSE_CACHE' && (
                   <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
                     <Database className="w-3 h-3 text-blue-400" />
                     Histórico Oficial TSE (Cache)
-                  </span>
-                )}
-                {provenance === 'MANUAL_IMPORT_UNVERIFIED' && (
-                  <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider">
-                    <Upload className="w-3 h-3 text-purple-400" />
-                    Importado Manualmente
                   </span>
                 )}
                 {provenance === 'DEMONSTRATIVE_BASELINE' && (
@@ -98,22 +83,13 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Eleição Presidencial 2026 • Apuração Oficial do TSE
+                Eleição Presidencial 2026
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenImportModal}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-xs hover:bg-amber-400 transition-all shadow-sm"
-              title="Importar arquivo oficial do TSE"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Importar TSE
-            </button>
-
-            {/* Separate Audit Timestamps & Data Age (Issue 7) */}
+            {/* Separate Audit Timestamps & Data Age */}
             <div className="hidden lg:flex flex-col text-right px-2 border-r border-slate-800 text-[11px]">
               <span className="font-semibold text-slate-200">
                 {dataHoraGeracaoTse ? `Geração TSE: ${dataHoraGeracaoTse}` : 'Aguardando Geração Oficial'}
@@ -149,7 +125,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
 
         {/* Turn & Scope Filter Controls Bar */}
         <div className="py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
-          {/* Turn Tabs and Scope Selector */}
+          {/* Turn Tabs */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
               <button
@@ -160,7 +136,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                2º Turno (Eleição 6258)
+                2º Turno 
               </button>
               <button
                 onClick={() => onTurnChange(1)}
@@ -170,33 +146,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                1º Turno (Eleição 6257)
-              </button>
-            </div>
-
-            {/* Scope Selector */}
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => onScopeChange('BR')}
-                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all ${
-                  selectedScope === 'BR'
-                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <MapPin className="w-3 h-3" />
-                Brasil (BR)
-              </button>
-              <button
-                onClick={() => onScopeChange('ZZ')}
-                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-all ${
-                  selectedScope === 'ZZ'
-                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Globe className="w-3 h-3" />
-                Exterior (ZZ)
+                1º Turno
               </button>
             </div>
           </div>
@@ -204,7 +154,7 @@ export const TseHeader: React.FC<TseHeaderProps> = ({
           {/* Section Progress Bar */}
           <div className="w-full md:w-auto flex items-center justify-between md:justify-start gap-3 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
             <span className="text-slate-300 font-medium text-nowrap">
-              Seções Apuradas ({selectedScope}):
+              Seções Apuradas (Brasil):
             </span>
             {totalizedSectionsPct !== null ? (
               <>

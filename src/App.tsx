@@ -9,15 +9,13 @@ import { initialPresidentialData } from './data/presidentialData';
 import { TseHeader } from './components/TseHeader';
 import { NationalSummary } from './components/NationalSummary';
 import { StateCountryBreakdown } from './components/StateCountryBreakdown';
-import { ImportDataModal } from './components/ImportDataModal';
-import { WifiOff, ShieldCheck, Database, History } from 'lucide-react';
+import { WifiOff, Globe, MapPin } from 'lucide-react';
 
 export default function App() {
   const [presidentialData, setPresidentialData] = useState<PresidentialElectionData>(initialPresidentialData);
   const [currentTurn, setCurrentTurn] = useState<1 | 2>(2);
-  const [selectedScope, setSelectedScope] = useState<string>('BR');
+  const [activeTab, setActiveTab] = useState<'nacional' | 'estados'>('nacional');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>('CACHE_FALLBACK');
   const [provenance, setProvenance] = useState<DataProvenance>('DEMONSTRATIVE_BASELINE');
   const [requestSucceeded, setRequestSucceeded] = useState<boolean>(false);
@@ -30,7 +28,7 @@ export default function App() {
   const isFetchingRef = useRef<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const fetchData = useCallback(async (scope: string = selectedScope, turn: 1 | 2 = currentTurn) => {
+  const fetchData = useCallback(async (turn: 1 | 2 = currentTurn) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsLoading(true);
@@ -39,7 +37,7 @@ export default function App() {
     abortControllerRef.current = controller;
 
     try {
-      const response = await fetch(`/api/data?scope=${encodeURIComponent(scope)}&turn=${turn}`, {
+      const response = await fetch(`/api/data?scope=BR&turn=${turn}`, {
         signal: controller.signal
       });
 
@@ -53,7 +51,6 @@ export default function App() {
           setFetchError(result.fetchError);
           setIsStale(result.isStale);
           setLastSuccessfulFetchAt(result.lastSuccessfulFetchAt);
-
           if (result.presidentialData) {
             setPresidentialData(result.presidentialData);
           }
@@ -73,11 +70,11 @@ export default function App() {
       setIsLoading(false);
       isFetchingRef.current = false;
     }
-  }, [selectedScope, currentTurn]);
+  }, [currentTurn]);
 
   // Initial fetch on mount
   useEffect(() => {
-    fetchData(selectedScope, currentTurn);
+    fetchData(currentTurn);
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -85,24 +82,19 @@ export default function App() {
     };
   }, []);
 
-  // Scope or turn change
+  // Turn change
   const handleTurnChange = (newTurn: 1 | 2) => {
     setCurrentTurn(newTurn);
-    fetchData(selectedScope, newTurn);
-  };
-
-  const handleScopeChange = (newScope: string) => {
-    setSelectedScope(newScope);
-    fetchData(newScope, currentTurn);
+    fetchData(newTurn);
   };
 
   // Automatic 60s periodic polling
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchData(selectedScope, currentTurn);
+      fetchData(currentTurn);
     }, 60000);
     return () => clearInterval(interval);
-  }, [fetchData, selectedScope, currentTurn]);
+  }, [fetchData, currentTurn]);
 
   const activeRoundData = currentTurn === 2 ? presidentialData.turno2 : presidentialData.turno1;
 
@@ -113,8 +105,6 @@ export default function App() {
         <TseHeader
           currentTurn={currentTurn}
           onTurnChange={handleTurnChange}
-          selectedScope={selectedScope}
-          onScopeChange={handleScopeChange}
           totalizedSectionsPct={activeRoundData.totalizedSectionsPct}
           provenance={provenance}
           isStale={isStale}
@@ -123,8 +113,7 @@ export default function App() {
           dataAgeSeconds={dataAgeSeconds}
           requestSucceeded={requestSucceeded}
           isLoading={isLoading}
-          onRefresh={() => fetchData(selectedScope, currentTurn)}
-          onOpenImportModal={() => setIsImportModalOpen(true)}
+          onRefresh={() => fetchData(currentTurn)}
           darkMode={darkMode}
           onToggleDarkMode={() => setDarkMode(!darkMode)}
         />
@@ -140,71 +129,53 @@ export default function App() {
                   Status da Conexão Oficial: {provenance === 'OFFICIAL_TSE_CACHE' ? 'Histórico em Cache' : 'Base de Espera'}
                 </p>
                 <p className="mt-0.5 text-amber-700 dark:text-amber-300/90">
-                  A consulta ao servidor do TSE para o escopo <strong>{selectedScope}</strong> retornou: <em>{fetchError}</em>.
-                  O painel está apresentando os dados isolados deste escopo e continuará tentando conectar automaticamente a cada 60s.
+                  A consulta ao servidor do TSE para o escopo <strong>Brasil</strong> retornou: <em>{fetchError}</em>.
+                  O painel está apresentando os dados oficiais consolidados e continuará tentando conectar automaticamente a cada 60s.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Key Highlights Banner */}
-          <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-4 text-xs font-medium shadow-sm">
-            <span className="font-bold uppercase tracking-wider text-amber-400 block mb-1">
-              📢 Painel de Apuração e Auditoria Oficial (Eleição {currentTurn === 2 ? '6258' : '6257'} • Escopo: {selectedScope}):
-            </span>
-            <ul className="list-disc list-inside space-y-1 text-slate-300">
-              {presidentialData.keyHighlights.map((hl, idx) => (
-                <li key={idx}>{hl}</li>
-              ))}
-            </ul>
+          {/* Tab Navigation: National vs State/Abroad */}
+          <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <button
+              onClick={() => setActiveTab('nacional')}
+              className={`px-4 py-2.5 rounded-xl font-extrabold text-sm transition-all flex items-center gap-2 ${
+                activeTab === 'nacional'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+              Resultado Nacional
+            </button>
+            <button
+              onClick={() => setActiveTab('estados')}
+              className={`px-4 py-2.5 rounded-xl font-extrabold text-sm transition-all flex items-center gap-2 ${
+                activeTab === 'estados'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+              }`}
+            >
+              <MapPin className="w-4 h-4" />
+              Resultados por Estado e Exterior
+            </button>
           </div>
 
-          {/* 1. Candidate Cards & Electoral Metrics */}
-          <NationalSummary
-            roundData={activeRoundData}
-            locationName={
-              selectedScope === 'BR'
-                ? 'Brasil (Totalização Nacional)'
-                : selectedScope === 'ZZ'
-                ? 'Exterior (Zona ZZ)'
-                : `Estado: ${selectedScope}`
-            }
-            audit={presidentialData.audit}
-          />
-
-          {/* 2. Detailed Breakdown by State (UFs) & Exterior (Zona ZZ) */}
-          <StateCountryBreakdown
-            locations={activeRoundData.locations}
-            onSelectScope={handleScopeChange}
-          />
+          {/* Tab Content */}
+          {activeTab === 'nacional' ? (
+            <NationalSummary
+              roundData={activeRoundData}
+              locationName="Brasil"
+              audit={presidentialData.audit}
+            />
+          ) : (
+            <StateCountryBreakdown
+              locations={activeRoundData.locations}
+            />
+          )}
         </main>
 
-        {/* Import / Edit Data Modal */}
-        <ImportDataModal
-          isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
-          currentData={presidentialData}
-          onSaveData={(newData) => {
-            setPresidentialData(newData);
-            setProvenance('MANUAL_IMPORT_UNVERIFIED');
-            setFetchStatus('MANUAL_IMPORTED');
-            setRequestSucceeded(false); // Manual import must never pretend to be a live official fetch (Issue 7)
-          }}
-        />
-
-        {/* TSE Official Footer */}
-        <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 mt-12 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
-          <p className="font-semibold text-slate-700 dark:text-slate-300">
-            Tribunal Superior Eleitoral • Justiça Eleitoral (Eleições 2026)
-          </p>
-          <p className="mt-1">
-            Fonte: Sistema de Resultados da Justiça Eleitoral ({presidentialData.source}).
-          </p>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Procedência do Registro: <strong>{provenance}</strong>
-            {presidentialData.audit?.contentHash && ` • Hash SHA-256: ${presidentialData.audit.contentHash.slice(0, 12)}...`}
-          </p>
-        </footer>
       </div>
     </div>
   );

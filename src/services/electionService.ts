@@ -191,71 +191,67 @@ export function buildDocumentedTseUrl(scope: TseScope, electionCode: string): st
   return `https://resultados.tse.jus.br/oficial/ele2026/${electionCode}/dados/${scopeLower}/${scopeLower}-c0001-e00${electionCode}-u.json`;
 }
 
-interface ScopedCacheEntry {
-  cacheKey: string; // e.g. "6258_t2_BR"
+interface MasterCacheEntry {
+  cacheKey: string;
   electionCode: string;
   turn: 1 | 2;
-  scope: string;
   data: PresidentialElectionData;
-  contentHash: string;
+  scopeHashes: { [scope: string]: string };
   lastSuccessfulFetchAt: string | null;
   lastContentChangeAt: string | null;
   lastAttemptedFetchAt: string;
 }
 
-const memoryCacheMap = new Map<string, ScopedCacheEntry>();
+const memoryMasterCacheMap = new Map<string, MasterCacheEntry>();
 
-function getCacheFilePath(key: string): string {
-  return path.join(SCOPED_CACHE_DIR, `cache_${key}.json`);
+function getMasterCacheFilePath(electionCode: string, turn: number): string {
+  return path.join(SCOPED_CACHE_DIR, `cache_${electionCode}_t${turn}_master_v12.json`);
 }
 
-function loadScopedCache(key: string, electionCode: string, turn: 1 | 2, scope: string): ScopedCacheEntry {
-  const inMemory = memoryCacheMap.get(key);
+function loadMasterCache(electionCode: string, turn: 1 | 2): MasterCacheEntry {
+  const cacheKey = `${electionCode}_t${turn}_master`;
+  const inMemory = memoryMasterCacheMap.get(cacheKey);
   if (inMemory) return inMemory;
 
-  const filePath = getCacheFilePath(key);
+  const filePath = getMasterCacheFilePath(electionCode, turn);
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.data && parsed.scope === scope && parsed.turn === turn) {
-        memoryCacheMap.set(key, parsed);
+      if (parsed && parsed.data && parsed.turn === turn) {
+        memoryMasterCacheMap.set(cacheKey, parsed);
         return parsed;
       }
     }
   } catch (err) {
-    console.warn(`Erro ao carregar cache para ${key}:`, err);
+    console.warn(`Erro ao carregar master cache para ${cacheKey}:`, err);
   }
 
-  // Create isolated baseline specifically for this scope and turn
-  const baselineHash = crypto.createHash('sha256').update(key).digest('hex');
   const isolatedData: PresidentialElectionData = JSON.parse(JSON.stringify(initialPresidentialData));
-  isolatedData.audit.codigoAbrangencia = scope;
   isolatedData.audit.codigoEleicao = electionCode;
 
-  const baseline: ScopedCacheEntry = {
-    cacheKey: key,
+  const masterEntry: MasterCacheEntry = {
+    cacheKey,
     electionCode,
     turn,
-    scope,
     data: isolatedData,
-    contentHash: baselineHash,
+    scopeHashes: {},
     lastSuccessfulFetchAt: null,
     lastContentChangeAt: null,
     lastAttemptedFetchAt: new Date().toISOString()
   };
 
-  memoryCacheMap.set(key, baseline);
-  return baseline;
+  memoryMasterCacheMap.set(cacheKey, masterEntry);
+  return masterEntry;
 }
 
-function saveScopedCache(entry: ScopedCacheEntry) {
-  memoryCacheMap.set(entry.cacheKey, entry);
-  const filePath = getCacheFilePath(entry.cacheKey);
+function saveMasterCache(entry: MasterCacheEntry) {
+  memoryMasterCacheMap.set(entry.cacheKey, entry);
+  const filePath = getMasterCacheFilePath(entry.electionCode, entry.turn);
   try {
     fs.writeFileSync(filePath, JSON.stringify(entry), 'utf8');
   } catch (err) {
-    console.warn(`Erro ao salvar cache em disco para ${entry.cacheKey}:`, err);
+    console.warn(`Erro ao salvar master cache em disco para ${entry.cacheKey}:`, err);
   }
 }
 
@@ -272,7 +268,6 @@ function recordFullSnapshot(metadata: TseSnapshotMetadata, rawJsonText?: string)
 
     ledger.unshift(metadata);
 
-    // Save full raw JSON to disk for 100% complete audit reconstruction
     if (rawJsonText) {
       try {
         const rawFilePath = path.join(SNAPSHOTS_RAW_DIR, `snapshot_${metadata.snapshotId}.json`);
@@ -282,7 +277,6 @@ function recordFullSnapshot(metadata: TseSnapshotMetadata, rawJsonText?: string)
       }
     }
 
-    // Retention policy: keep up to 100 total snapshots, and at most 20 snapshots per scope
     const scopeCountMap: { [key: string]: number } = {};
     const filteredLedger = ledger.filter((snap) => {
       const key = `${snap.scope}_t${snap.turn}`;
@@ -349,7 +343,6 @@ export async function getOrFetchElectionData(params?: {
 }): Promise<ApiResponse> {
   const lastAttemptedFetchAt = new Date().toISOString();
 
-  // P1: Strict validation of requested scope - REJECT invalid scopes, never silently substitute (Issue 7)
   const rawScope = (params?.scope || 'BR').toUpperCase();
   if (!(ALLOWED_SCOPES as readonly string[]).includes(rawScope)) {
     return {
@@ -373,7 +366,6 @@ export async function getOrFetchElectionData(params?: {
     };
   }
 
-  // P0: Strict Turn Validation - Rejects any turn different from 1 or 2
   if (params?.turn !== undefined && params.turn !== 1 && params.turn !== 2) {
     return {
       success: false,
@@ -399,110 +391,104 @@ export async function getOrFetchElectionData(params?: {
   const validScope = rawScope as TseScope;
   const turn: 1 | 2 = params?.turn === 1 ? 1 : 2;
 
-  // 1. Resolve official election code from TSE catalog (P0 & P1)
   const electionConfig = await resolveActiveElectionConfig();
   const electionCode = turn === 1 ? electionConfig.codeTurno1 : electionConfig.codeTurno2;
 
-  // 2. Load strictly scoped cache (P0)
-  const cacheKey = `${electionCode}_t${turn}_${validScope}`;
-  const scopedCache = loadScopedCache(cacheKey, electionCode, turn, validScope);
-  scopedCache.lastAttemptedFetchAt = lastAttemptedFetchAt;
+  const masterCache = loadMasterCache(electionCode, turn);
+  masterCache.lastAttemptedFetchAt = lastAttemptedFetchAt;
+
+  // Concurrently fetch requested scope and all other scopes in ALLOWED_SCOPES simultaneously
+  const scopesToFetch = Array.from(new Set([validScope, ...ALLOWED_SCOPES]));
 
   let requestSucceeded = false;
-  let fetchStatus: FetchStatus = 'CACHE_FALLBACK';
   let isLive = false;
   let fetchError: string | null = null;
-  let provenance: DataProvenance = scopedCache.data.audit?.provenance || 'DEMONSTRATIVE_BASELINE';
 
-  // 3. Official Documented URL pattern (-u.json) - No speculative alternatives (P0)
-  const officialDocumentedUrl = buildDocumentedTseUrl(validScope, electionCode);
-  const networkResult = await fetchTseEndpointSecurely(officialDocumentedUrl);
+  await Promise.all(
+    scopesToFetch.map(async (s) => {
+      const sUrl = buildDocumentedTseUrl(s, electionCode);
+      const netRes = await fetchTseEndpointSecurely(sUrl);
+      if (netRes.ok && netRes.text) {
+        try {
+          const sHash = crypto.createHash('sha256').update(netRes.text).digest('hex');
+          const sJson = JSON.parse(netRes.text);
+          const parseRes = parseTseOfficialJson(sJson, {
+            expectedTurn: turn,
+            expectedScope: s,
+            expectedElectionCode: electionCode,
+            sourceVerified: true,
+            provenance: 'OFFICIAL_TSE_LIVE',
+            sourceUrl: sUrl,
+            rawContentHash: sHash,
+            configOrigin: electionConfig.source,
+            existingData: masterCache.data
+          });
 
-  if (networkResult.ok && networkResult.text) {
-    try {
-      const rawHash = crypto.createHash('sha256').update(networkResult.text).digest('hex');
-      const rawJson: TseRawJson = JSON.parse(networkResult.text);
-
-      // Strict parse with mandatory expectedElectionCode & expectedScope
-      const parsedResult = parseTseOfficialJson(rawJson, {
-        expectedTurn: turn,
-        expectedScope: validScope,
-        expectedElectionCode: electionCode,
-        sourceVerified: true,
-        provenance: 'OFFICIAL_TSE_LIVE',
-        sourceUrl: officialDocumentedUrl,
-        rawContentHash: rawHash,
-        configOrigin: electionConfig.source,
-        existingData: scopedCache.data
-      });
-
-      if (parsedResult.success && parsedResult.data) {
-        requestSucceeded = true;
-        isLive = true;
-        provenance = 'OFFICIAL_TSE_LIVE';
-        scopedCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
-
-        // P1: Check if content ACTUALLY changed to update lastContentChangeAt correctly
-        if (rawHash !== scopedCache.contentHash) {
-          fetchStatus = 'LIVE_UPDATED';
-          scopedCache.contentHash = rawHash;
-          scopedCache.lastContentChangeAt = lastAttemptedFetchAt;
-          scopedCache.data = parsedResult.data;
-          scopedCache.data.lastContentChangeAt = lastAttemptedFetchAt;
-          saveScopedCache(scopedCache);
-
-          // P2: Record full snapshot with candidate list, metrics, and raw content
-          const activeRound = turn === 2 ? parsedResult.data.turno2 : parsedResult.data.turno1;
-          recordFullSnapshot({
-            snapshotId: `${cacheKey}_${Date.now()}`,
-            electionCode,
-            turn,
-            scope: validScope,
-            dataHoraGeracaoTse: parsedResult.data.audit.dataHoraGeracaoTse,
-            retrievedAt: lastAttemptedFetchAt,
-            contentHash: rawHash,
-            totalValidVotes: activeRound.totalValidVotes,
-            totalizedSectionsPct: activeRound.totalizedSectionsPct,
-            totalSections: activeRound.totalSections,
-            totalizedSections: activeRound.totalizedSections,
-            votersEligible: activeRound.votersEligible,
-            abstentions: activeRound.abstentions,
-            candidates: activeRound.nationalCandidates
-          }, networkResult.text);
-        } else {
-          fetchStatus = 'LIVE_UNCHANGED';
-          // P1: Persist updated lastSuccessfulFetchAt to disk even when content is unchanged!
-          saveScopedCache(scopedCache);
-        }
-        fetchError = null;
-      } else {
-        fetchError = parsedResult.errors?.join('; ') || 'Formato de resposta incompatível com o leiaute oficial do TSE.';
+          if (parseRes.success && parseRes.data) {
+            masterCache.scopeHashes[s] = sHash;
+            if (s === validScope) {
+              requestSucceeded = true;
+              isLive = true;
+              masterCache.lastSuccessfulFetchAt = lastAttemptedFetchAt;
+              if (sHash !== masterCache.scopeHashes[`${s}_prev`]) {
+                masterCache.scopeHashes[`${s}_prev`] = sHash;
+                masterCache.lastContentChangeAt = lastAttemptedFetchAt;
+              }
+              // Record snapshot for primary requested scope
+              const activeRound = turn === 2 ? parseRes.data.turno2 : parseRes.data.turno1;
+              recordFullSnapshot({
+                snapshotId: `${electionCode}_t${turn}_${s}_${Date.now()}`,
+                electionCode,
+                turn,
+                scope: s,
+                dataHoraGeracaoTse: parseRes.data.audit.dataHoraGeracaoTse,
+                retrievedAt: lastAttemptedFetchAt,
+                contentHash: sHash,
+                totalValidVotes: activeRound.totalValidVotes,
+                totalizedSectionsPct: activeRound.totalizedSectionsPct,
+                totalSections: activeRound.totalSections,
+                totalizedSections: activeRound.totalizedSections,
+                votersEligible: activeRound.votersEligible,
+                abstentions: activeRound.abstentions,
+                candidates: activeRound.nationalCandidates
+              }, netRes.text);
+            }
+          }
+        } catch {}
+      } else if (s === validScope) {
+        fetchError = netRes.error || `Falha HTTP ao consultar ${s}`;
       }
-    } catch (parseErr: any) {
-      fetchError = `Falha ao interpretar resposta do TSE: ${parseErr.message}`;
-    }
-  }
+    })
+  );
 
-  if (!isLive) {
+  saveMasterCache(masterCache);
+
+  let fetchStatus: FetchStatus = 'CACHE_FALLBACK';
+  let provenance: DataProvenance = masterCache.data.audit?.provenance || 'DEMONSTRATIVE_BASELINE';
+
+  if (isLive) {
+    fetchStatus = 'LIVE_UPDATED';
+    provenance = 'OFFICIAL_TSE_LIVE';
+    fetchError = null;
+  } else {
     fetchStatus = fetchError ? 'FETCH_ERROR' : 'CACHE_FALLBACK';
-    if (scopedCache.data.audit.sourceVerified) {
+    if (masterCache.data.audit.sourceVerified) {
       provenance = 'OFFICIAL_TSE_CACHE';
     } else {
-      provenance = scopedCache.data.audit.provenance;
+      provenance = masterCache.data.audit.provenance;
     }
   }
 
   const dataIsOfficial = provenance === 'OFFICIAL_TSE_LIVE' || provenance === 'OFFICIAL_TSE_CACHE';
   const isStale = !isLive && dataIsOfficial;
 
-  // P1: Calculate dataAgeSeconds from lastContentChangeAt (or dataHoraGeracaoTse)
   let dataAgeSeconds: number | null = null;
-  const timeBasis = scopedCache.lastContentChangeAt || scopedCache.lastSuccessfulFetchAt;
+  const timeBasis = masterCache.lastContentChangeAt || masterCache.lastSuccessfulFetchAt;
   if (timeBasis) {
     dataAgeSeconds = Math.round((Date.now() - new Date(timeBasis).getTime()) / 1000);
   }
 
-  const activeRound = turn === 2 ? scopedCache.data.turno2 : scopedCache.data.turno1;
+  const activeRound = turn === 2 ? masterCache.data.turno2 : masterCache.data.turno1;
   const dataAvailable = activeRound.totalValidVotes !== null && activeRound.totalValidVotes > 0;
 
   return {
@@ -518,11 +504,11 @@ export async function getOrFetchElectionData(params?: {
     isStale,
     dataAgeSeconds,
     fetchError,
-    lastSuccessfulFetchAt: scopedCache.lastSuccessfulFetchAt,
-    lastContentChangeAt: scopedCache.lastContentChangeAt,
+    lastSuccessfulFetchAt: masterCache.lastSuccessfulFetchAt,
+    lastContentChangeAt: masterCache.lastContentChangeAt,
     lastAttemptedFetchAt,
-    dataHoraGeracaoTse: scopedCache.data.audit.dataHoraGeracaoTse || null,
-    presidentialData: scopedCache.data,
+    dataHoraGeracaoTse: masterCache.data.audit.dataHoraGeracaoTse || null,
+    presidentialData: masterCache.data,
     snapshots: getSnapshotsLedger()
   };
 }
