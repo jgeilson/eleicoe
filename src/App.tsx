@@ -131,11 +131,13 @@ export default function App() {
               <WifiOff className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <p className="font-extrabold text-amber-800 dark:text-amber-300">
-                  Status da Conexão Oficial: {provenance === 'OFFICIAL_TSE_CACHE' ? 'Histórico em Cache' : 'Base de Espera'}
+                  Status da Conexão Oficial: {provenance === 'OFFICIAL_TSE_CACHE' ? 'Histórico em Cache' : 'Aguardando Conexão com TSE'}
                 </p>
                 <p className="mt-0.5 text-amber-700 dark:text-amber-300/90">
                   A consulta ao servidor do TSE para o escopo <strong>Brasil (Nacional)</strong> retornou: <em>{fetchError}</em>.
-                  O painel está apresentando os dados oficiais consolidados e continuará tentando conectar automaticamente a cada 60s.
+                  {provenance === 'OFFICIAL_TSE_CACHE'
+                    ? ' O painel está apresentando os dados oficiais salvos em cache e continuará tentando conectar automaticamente a cada 60s.'
+                    : ' Nenhuma base pré-definida de votos é exibida. O painel aguarda a disponibilização dos arquivos pelo TSE e continuará tentando conectar a cada 60s.'}
                 </p>
               </div>
             </div>
